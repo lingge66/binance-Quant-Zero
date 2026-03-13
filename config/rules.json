@@ -1,0 +1,140 @@
+[
+  {
+    "rule_id": "stop_loss_fixed",
+    "rule_name": "固定比例止损",
+    "rule_type": "stop_loss",
+    "priority": 75,
+    "enabled": true,
+    "parameters": {
+      "stop_loss_percent": 0.02,
+      "description": "当未实现亏损达到2%时触发止损"
+    },
+    "description": "固定比例止损规则"
+  },
+  {
+    "rule_id": "stop_loss_trailing",
+    "rule_name": "移动止损",
+    "rule_type": "stop_loss",
+    "priority": 75,
+    "enabled": true,
+    "parameters": {
+      "activation_percent": 0.01,
+      "trailing_percent": 0.005,
+      "description": "盈利1%后激活，跟踪0.5%回撤"
+    },
+    "description": "移动止损规则"
+  },
+  {
+    "rule_id": "take_profit_fixed",
+    "rule_name": "固定比例止盈",
+    "rule_type": "take_profit",
+    "priority": 50,
+    "enabled": true,
+    "parameters": {
+      "take_profit_percent": 0.05,
+      "description": "当未实现盈利达到5%时触发止盈"
+    },
+    "description": "固定比例止盈规则"
+  },
+  {
+    "rule_id": "position_size_max",
+    "rule_name": "最大仓位限制",
+    "rule_type": "position_size",
+    "priority": 75,
+    "enabled": true,
+    "parameters": {
+      "max_position_percent": 0.1,
+      "description": "单笔交易最大仓位不超过总资金的10%"
+    },
+    "description": "最大仓位限制规则"
+  },
+  {
+    "rule_id": "leverage_limit",
+    "rule_name": "杠杆倍数限制",
+    "rule_type": "leverage",
+    "priority": 75,
+    "enabled": true,
+    "parameters": {
+      "max_leverage": 10.0,
+      "description": "最大杠杆倍数限制为10倍"
+    },
+    "description": "杠杆限制规则"
+  },
+  {
+    "rule_id": "trading_frequency_hourly",
+    "rule_name": "小时交易频率限制",
+    "rule_type": "trading_frequency",
+    "priority": 50,
+    "enabled": true,
+    "parameters": {
+      "max_trades_per_hour": 10,
+      "window_hours": 1,
+      "description": "每小时最多10笔交易"
+    },
+    "description": "小时级别交易频率限制"
+  },
+  {
+    "rule_id": "trading_frequency_daily",
+    "rule_name": "日交易频率限制",
+    "rule_type": "trading_frequency",
+    "priority": 50,
+    "enabled": true,
+    "parameters": {
+      "max_trades_per_day": 50,
+      "window_hours": 24,
+      "description": "每日最多50笔交易"
+    },
+    "description": "日级别交易频率限制"
+  },
+  {
+    "rule_id": "risk_exposure_daily",
+    "rule_name": "每日风险暴露限制",
+    "rule_type": "risk_exposure",
+    "priority": 100,
+    "enabled": true,
+    "parameters": {
+      "max_daily_loss_percent": 0.05,
+      "description": "当日累计亏损达到5%时停止开仓"
+    },
+    "description": "每日风险暴露限制"
+  },
+  {
+    "rule_id": "correlation_risk_exposure",
+    "rule_name": "相关性风险暴露限制",
+    "rule_type": "risk_exposure",
+    "priority": 60,
+    "enabled": true,
+    "parameters": {
+      "max_correlated_exposure": 0.3,
+      "correlation_threshold": 0.7,
+      "description": "相关性高于0.7的交易对总仓位不超过30%"
+    },
+    "description": "相关性风险暴露限制"
+  },
+  {
+    "rule_id": "market_volatility_adaptive",
+    "rule_name": "市场波动自适应规则",
+    "rule_type": "custom",
+    "priority": 40,
+    "enabled": true,
+    "parameters": {
+      "high_volatility_threshold": 0.15,
+      "position_reduction_percent": 0.5,
+      "description": "市场波动率高于15%时，仓位减少50%"
+    },
+    "description": "市场波动率自适应调整规则"
+  },
+  {
+    "rule_id": "liquidity_risk_control",
+    "rule_name": "流动性风险控制",
+    "rule_type": "custom",
+    "priority": 70,
+    "enabled": true,
+    "parameters": {
+      "min_liquidity_score": 0.3,
+      "position_limit_percent": 0.05,
+      "description": "流动性评分低于0.3时，单笔仓位限制在5%以内"
+    },
+    "description": "流动性风险控制规则"
+  }
+]

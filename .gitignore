@@ -1,0 +1,6 @@
+.env
+*.log
+data/
+__pycache__/
+venv/
+.coverage

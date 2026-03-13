@@ -1,0 +1,236 @@
+# Binance AI Trading Agent 配置
+# 版本: 1.0.0
+# 创建时间: 2026-03-12
+
+# 币安API配置
+binance:
+  # 环境: testnet (测试网) 或 mainnet (主网)
+  environment: mainnet
+  # API基础URL
+  base_urls:
+    testnet: https://testnet.binance.vision
+    mainnet: https://api.binance.com
+  # WebSocket基础URL
+  ws_urls:
+    testnet: wss://testnet.binance.vision
+    mainnet: wss://stream.binance.com:9443
+  # API权限配置 (从.env读取)
+  # BINANCE_API_KEY, BINANCE_SECRET_KEY, BINANCE_TESTNET
+
+# 数据采集配置
+data:
+  # 监控的交易对列表
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+    - BNBUSDT
+  # K线间隔
+  intervals:
+    - 1m
+    - 5m
+    - 15m
+    - 1h
+  # WebSocket订阅配置
+  websocket:
+    # 最大重连次数
+    max_reconnect_attempts: 10
+    # 指数退避基数 (秒)
+    reconnect_base_delay: 1
+    # 最大退避延迟 (秒)
+    max_reconnect_delay: 64
+    # 心跳间隔 (秒)
+    heartbeat_interval: 30
+    # 连接超时 (秒)
+    connect_timeout: 10
+  # 历史数据配置
+  historical:
+    # 获取历史K线天数
+    days: 30
+    # 每次请求最大K线数量
+    limit_per_request: 1000
+    # 数据存储格式: parquet 或 csv
+    storage_format: parquet
+    # 缓存最近K线数量
+    cache_size: 1000
+
+# 信号生成配置
+signals:
+  # 技术指标参数
+  indicators:
+    # 移动平均线
+    ma_periods: [5, 10, 20, 60]
+    # RSI周期
+    rsi_period: 14
+    # 布林带周期
+    bb_period: 20
+    bb_std: 2
+    # MACD参数
+    macd_fast: 12
+    macd_slow: 26
+    macd_signal: 9
+    # ATR周期
+    atr_period: 14
+  # AI模型配置
+  ai_model:
+    # 是否启用AI预测
+    enabled: false
+    # 模型类型: lstm 或 transformer
+    model_type: lstm
+    # 预测未来K线数量
+    prediction_horizon: 5
+    # 输入特征数量
+    input_features: 10
+
+# 风控配置
+risk:
+  # 账户监控
+  account:
+    # 保证金率预警阈值
+    margin_ratio_warning: 1.5
+    margin_ratio_critical: 1.2
+    # 仓位比例限制 (百分比)
+    position_ratio_limit: 30
+    # 单日亏损上限 (百分比)
+    daily_loss_limit: 5
+    # 单笔最大亏损 (百分比)
+    trade_loss_limit: 2
+  # 止损止盈
+  stop_loss:
+    # ATR倍数
+    atr_multiplier: 2
+    # 移动止损激活盈利 (百分比)
+    trailing_activation: 1.0
+    # 移动止损回撤 (百分比)
+    trailing_distance: 0.5
+  # 熔断规则
+  circuit_breaker:
+    # 最大连续亏损次数
+    max_consecutive_losses: 3
+    # 熔断冷却时间 (分钟)
+    cooldown_minutes: 60
+  # 规则引擎配置
+  rule_engine:
+    # 默认规则文件路径
+    rules_file: config/rules.json
+    # 规则评估缓存时间 (秒)
+    cache_ttl: 1
+    # 最大规则历史记录数
+    max_history: 1000
+    # 规则评估超时 (秒)
+    evaluation_timeout: 5
+  # 风险报告配置
+  reporter:
+    # 输出格式: console, json, csv, html, markdown, telegram, email
+    output_formats:
+      - console
+      - json
+    # 输出路径
+    output_path: reports
+    # 启用Telegram通知
+    enable_telegram: false
+    # 启用邮件通知
+    enable_email: false
+    # 预警阈值配置
+    warning_thresholds:
+      margin_ratio:
+        warning: 1.5
+        error: 1.2
+        critical: 1.0
+        alert_interval: 300  # 预警间隔 (秒)
+        absolute: false
+      daily_loss_percent:
+        warning: 3.0
+        error: 4.0
+        critical: 5.0
+        alert_interval: 600
+        absolute: true
+      position_ratio:
+        warning: 20.0
+        error: 25.0
+        critical: 30.0
+        alert_interval: 300
+        absolute: false
+
+# 交易执行配置
+execution:
+  # 交易模式: simulation, paper, live
+  mode: simulation
+  # 订单类型
+  order_types:
+    default: LIMIT
+    # 允许的订单类型
+    allowed: [LIMIT, MARKET, STOP_LOSS, STOP_LOSS_LIMIT, TAKE_PROFIT, TAKE_PROFIT_LIMIT]
+  # 订单执行参数
+  order_params:
+    # 默认时间条件
+    time_in_force: GTC
+    # 自我交易防护模式
+    self_trade_prevention_mode: EXPIRE_TAKER
+    # 接收窗口 (毫秒)
+    recv_window: 5000
+  # 模拟交易配置
+  simulation:
+    # 初始资金 (USDT)
+    initial_capital: 10000
+    # 手续费率 (百分比)
+    fee_rate: 0.1
+  # 实盘交易确认
+  live_trading:
+    # 二次确认超时 (秒)
+    confirmation_timeout: 30
+    # 确认关键字
+    confirmation_keyword: "CONFIRM"
+
+# 通知配置
+notification:
+  # Telegram配置
+  telegram:
+    # 是否启用
+    enabled: false
+    # Bot Token (从.env读取)
+    # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+    # 通知类型
+    notify_types:
+      - signal
+      - risk
+      - trade
+      - system
+  # 报告生成
+  reports:
+    # 日报生成时间 (UTC)
+    daily_report_time: "00:00"
+    # 周报生成时间 (UTC, 星期几)
+    weekly_report_time: "00:00"
+    weekly_report_day: 0  # 0=周日, 1=周一...
+
+# 日志配置
+logging:
+  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: INFO
+  # 日志文件路径
+  file_path: logs/agent.log
+  # 最大文件大小 (MB)
+  max_file_size: 100
+  # 保留文件数量
+  backup_count: 10
+  # 控制台输出
+  console: true
+
+# 系统配置
+system:
+  # 主循环间隔 (秒)
+  main_loop_interval: 1
+  # 健康检查间隔 (秒)
+  health_check_interval: 60
+  # 性能监控
+  performance:
+    # 内存使用预警 (MB)
+    memory_warning: 500
+    # CPU使用预警 (百分比)
+    cpu_warning: 70
+  # 数据备份
+  backup:
+    # 自动备份间隔 (小时)
+    interval_hours: 24
+    # 保留备份天数
+    retention_days: 7
