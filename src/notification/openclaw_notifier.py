@@ -1,4 +1,11 @@
 """
+Copyright (c) 2026 lingge66. All rights reserved.
+This code is part of the Binance AI Agent project and is protected by copyright law.
+Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
+"""
+
+
+"""
 OpenClaw通知器 - 通过OpenClaw消息系统发送通知
 
 功能：

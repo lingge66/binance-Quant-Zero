@@ -1,4 +1,11 @@
 """
+Copyright (c) 2026 lingge66. All rights reserved.
+This code is part of the Binance AI Agent project and is protected by copyright law.
+Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
+"""
+
+
+"""
 仓位管理器 - 负责持仓跟踪、盈亏计算与仓位调整
 
 核心功能：

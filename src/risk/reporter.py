@@ -1,4 +1,11 @@
 """
+Copyright (c) 2026 lingge66. All rights reserved.
+This code is part of the Binance AI Agent project and is protected by copyright law.
+Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
+"""
+
+
+"""
 风险报告模块 - 风险监控、报告与可视化
 
 核心功能：

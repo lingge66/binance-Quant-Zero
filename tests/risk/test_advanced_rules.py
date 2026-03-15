@@ -1,4 +1,11 @@
 """
+Copyright (c) 2026 lingge66. All rights reserved.
+This code is part of the Binance AI Agent project and is protected by copyright law.
+Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
+"""
+
+
+"""
 高级规则引擎测试 - 验证时间窗口、相关性风险、市场自适应规则
 
 测试内容：

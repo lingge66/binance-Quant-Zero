@@ -1,3 +1,10 @@
+"""
+Copyright (c) 2026 lingge66. All rights reserved.
+This code is part of the Binance AI Agent project and is protected by copyright law.
+Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
+"""
+
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -19,7 +26,8 @@ def generate_sample_data():
     """生成示例K线数据（用于演示）"""
     np.random.seed(42)
     n = 200
-    dates = pd.date_range('2026-01-01', periods=n, freq='1H')
+    # 修改后变成这样：
+    dates = pd.date_range('2026-01-01', periods=n, freq='1h')
     
     # 模拟价格序列（随机游走）
     price = 50000 + np.cumsum(np.random.randn(n) * 100)

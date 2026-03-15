@@ -5,7 +5,7 @@
 # 币安API配置
 binance:
   # 环境: testnet (测试网) 或 mainnet (主网)
-  environment: mainnet
+  environment: testnet
   # API基础URL
   base_urls:
     testnet: https://testnet.binance.vision

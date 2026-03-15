@@ -1,4 +1,11 @@
 """
+Copyright (c) 2026 lingge66. All rights reserved.
+This code is part of the Binance AI Agent project and is protected by copyright law.
+Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
+"""
+
+
+"""
 风控引擎模块 - 负责交易风险控制与管理
 
 模块组成：
