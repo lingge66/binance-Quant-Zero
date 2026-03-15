@@ -126,9 +126,10 @@ async def get_quant_account_status() -> str:
 
 async def emergency_close_all_positions() -> str:
     """
-    [最高危：一键紧急平仓 - 战报结算版]
-    暴力平仓的同时，抓取平仓前一瞬间的盈亏快照，并生成详尽的资金结算清单。
+    [最高危：一键紧急平仓 - 终极抗延迟轰炸版]
+    全面轰炸撤单接口，增加释放等待期，并执行3轮重试抗击撮合引擎延迟。
     """
+    import asyncio  # 💥 救命的导入！直接写在函数内部，绝对不会再报 not defined！
     await arsenal.initialize()
     exchange = arsenal.monitor.exchange
     
@@ -136,14 +137,14 @@ async def emergency_close_all_positions() -> str:
         positions = await arsenal.monitor.fetch_positions()
         results = []
         errors = []
-        total_realized_pnl = 0.0  # 累计本次熔断的总盈亏
+        total_realized_pnl = 0.0
 
         for p in positions:
             amt_float = float(p.position_amount)
             if amt_float == 0:
                 continue
 
-            # 1. 📸 战前数据快照：在仓位消失前，截取开仓价和浮动盈亏
+            # 1. 📸 战前数据快照
             raw_symbol = p.symbol.split(':')[0].replace('/', '').upper()
             amt = abs(amt_float)
             amt_str = f"{amt:.8f}".rstrip('0').rstrip('.') if '.' in f"{amt:.8f}" else f"{amt:.8f}"
@@ -153,7 +154,6 @@ async def emergency_close_all_positions() -> str:
             pnl_str = f"+{pnl:.2f}" if pnl > 0 else f"{pnl:.2f}"
             pnl_icon = "🟩" if pnl > 0 else "🟥" if pnl < 0 else "⬜️"
             
-            # 判断多空方向用于UI展示
             side_str = 'SELL' if amt_float > 0 else 'BUY'
             p_side_attr = str(getattr(p, 'position_side', getattr(p, 'positionSide', getattr(p, 'side', '')))).upper()
             target_pos_side = p_side_attr if p_side_attr in ['LONG', 'SHORT'] else ('LONG' if amt_float > 0 else 'SHORT')
@@ -162,32 +162,49 @@ async def emergency_close_all_positions() -> str:
             success = False
             last_error = ""
 
-            # 2. 🚀 执行三段式暴力平仓
-            try:
-                await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str, 'positionSide': target_pos_side})
-                success = True
-            except Exception as e:
+            # 🚀【核心升级】无死角轰炸撤单：解决 Algo 订单取消遗漏释放保证金
+            try: await exchange.cancel_all_orders(p.symbol)
+            except: pass
+            try: await exchange.fapiPrivateDeleteAllOpenOrders({'symbol': raw_symbol})
+            except: pass
+            
+            # ⏳ 战术停顿：等足 1.5 秒，让币安撮合引擎把锁定的保证金吐出来！
+            await asyncio.sleep(1.5)
+
+            # 2. 🚀 执行三段式暴力平仓 (增加3轮重试抗延迟机制)
+            for attempt in range(3):
                 try:
-                    await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str, 'reduceOnly': 'true'})
+                    await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str, 'positionSide': target_pos_side})
                     success = True
-                except Exception as e2:
+                    break
+                except Exception as e:
                     try:
-                        await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str})
+                        await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str, 'reduceOnly': 'true'})
                         success = True
-                    except Exception as e3:
-                        last_error = str(e3)
+                        break
+                    except Exception as e2:
+                        try:
+                            await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str})
+                            success = True
+                            break
+                        except Exception as e3:
+                            last_error = str(e3)
+                
+                if not success:
+                    # 测试网卡顿，再等 1 秒继续砸单！
+                    await asyncio.sleep(1)
 
             # 3. 📝 记录战果
             if success:
                 total_realized_pnl += pnl
                 results.append(f"• {dir_icon} `{raw_symbol}` | 平仓数量: {amt_str}\n  └─ {pnl_icon} 结算盈亏: `{pnl_str} U` | 原开仓均价: ${entry_price:.2f}")
             else:
-                errors.append(f"❌ `{raw_symbol}`: 平仓被币安拒绝 - {last_error}")
+                errors.append(f"❌ `{raw_symbol}`: 历经3轮强制平仓仍被币安拒绝 - {last_error}")
 
-        # 4. 🏦 获取清算后的金库最新余额
+        # 4. 🏦 获取最新余额
         balance = await arsenal.monitor.fetch_account_balance(force_refresh=True)
 
-        # 5. 🎨 组装彭博级结算面板
+        # 5. 🎨 组装结算面板
         msg_parts = []
         if results:
             total_pnl_icon = "💰" if total_realized_pnl >= 0 else "🩸"
