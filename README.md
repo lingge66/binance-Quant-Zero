@@ -120,8 +120,8 @@ python main_auto_bot.py
 
 ## 📞 技术支持与声明
 
-**主架构师**：lingge66@shangdu2005 & AI 团队
-
+**主架构师**：lingge66 & AI 团队
+**Twitter**：[@shangdu2005](https://x.com/shangdu2005)
 **环境要求**：Ubuntu/Debian Linux, Python 3.9+
 
 **免责声明**：加密货币合约交易具有极高风险。本项目代码开源仅供技术交流与比赛演示。在使用实盘（Live）模式前，请务必在 Testnet（测试网）充分验证。您对自己的所有交易行为及结果负完全责任。
@@ -252,8 +252,8 @@ User fund safety is the highest principle of this system, with the following fou
 
 ## 📞 Technical Support & Disclaimer
 
-**Lead Architect**: lingge66@shangdu2005 & AI Team
-
+**Lead Architect**: lingge66& AI Team
+**Twitter**：[@shangdu2005](https://x.com/shangdu2005)
 **Environment Requirements**: Ubuntu/Debian Linux, Python 3.9+
 
 **Disclaimer**: Cryptocurrency futures trading carries extremely high risk. This project's code is open source for technical exchange and competition demonstration only. Before using Live mode, you must fully verify on Testnet. You are solely responsible for all your trading actions and results.
