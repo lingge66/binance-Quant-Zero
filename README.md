@@ -2,7 +2,7 @@
 # 🌌 领哥量化机甲 (Quant-Zero V1.0 满配版)
 **币安 AI 智能交易信号与 SMC 风控 Agent**
 
-基于 OpenClaw 的 AI 驱动交易 Agent，专为币安大客户及量化极客打造。
+基于 OpenClaw 的 AI 驱动交易 Agent，专为币安客户及量化极客打造。
 本项目集成了**大语言模型语义解析**、**SMC 机构级盘面推演**与**彭博终端级 UI 面板**，彻底颠覆传统量化机器人的交互体验。
 
 ---
@@ -14,7 +14,7 @@
 - **🛡️ 上帝视角独立风控**：彻底告别“裸奔”！智能识别多空方向，独立为现有仓位极速补挂 Algo 条件单（止盈/止损），防范插针。
 - **🏦 彭博级金库终端**：一键 `/balance`，直接在 Telegram 渲染树状多空持仓明细与实时盈亏，账户状况一目了然。
 - **💥 一键紧急熔断**：发送 `/closeall`，兼容单/双向持仓的三段式暴力平仓引擎瞬间接管，平仓后自动生成详尽的“战损结算清单”。
-
+- **🤖 自动化交易**：发送‘开启自动交易’命令，启动全自动量化轮询引擎（策略无人值守执行），策略可随时优化。
 ---
 
 ## 📁 核心架构蓝图 (Project Structure)
@@ -46,90 +46,85 @@ binance-ai-agent/
 
 ## 🚀 极速安装指南 (Quick Start)
 
-为了保证您的 API 密钥安全，并避免环境冲突，请严格按照以下标准流程部署：
+为了更安全、稳定地运行本交易机甲，并防止与您现有的 OpenClaw 或其他机器人产生消息冲突，请严格按照以下**“零冲突架构”**进行独立部署。
 
-### 1. 克隆机甲仓库
+### 🤖 方式一：OpenClaw 助手一键全自动部署 (极客推荐)
 
-```bash
-git clone https://github.com/lingge66/binance-ai-agent.git
-cd binance-ai-agent
-```
+如果您已经在运行 OpenClaw，可以直接向您的 OpenClaw 助手发送以下“魔法咒语”，让它为您代劳基础安装：
 
-### 2. 铸造独立运行环境 (强烈推荐)
+**Prompt 提示词：**
+
+> "你好，请帮我在服务器上部署『领哥量化机甲』。请依次执行：1. git clone https://github.com/lingge66/binance-ai-agent.git 2. 进入目录并用 python3 -m venv quant_venv 创建虚拟环境。3. 激活环境并 pip install -r requirements.txt。4. 将 .env.example 复制为 .env。完成后告诉我，我将手动去配置密钥。"
+
+### 💻 方式二：标准手动部署流程
+
+#### 第一步：申请专属的“量化机甲 BOT” (隔离冲突)
+
+为避免消息拦截冲突，请勿使用已有的机器人 Token。
+
+1. 前往 Telegram 搜索 @BotFather
+2. 发送 `/newbot`，花 10 秒钟创建一个全新的专属机器人（例如：`lingge_quant_bot`）
+3. 复制获取那个崭新的、专属的 Bot Token
+
+#### 第二步：克隆代码与铸造独立环境
 
 切勿污染系统全局 Python 环境，请使用 venv 创建独立隔离区：
 
 ```bash
-# 创建名为 quant_venv 的虚拟环境
+git clone https://github.com/lingge66/binance-ai-agent.git
+cd binance-ai-agent
 python3 -m venv quant_venv
-
-# 激活环境 (Linux / macOS)
-source quant_venv/bin/activate
-# Windows 用户请使用: quant_venv\Scripts\activate
-
-# 一键安装底层驱动依赖
+source quant_venv/bin/activate  # Windows 用户: quant_venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. 🔐 配置核心密钥 (安全最高优先级)
+#### 第三步：🔐 独立配置 .env 核心密钥 (最高安全优先级)
 
-机甲的运行依赖币安 API 和 Telegram 机器人授权。我们采用“零信任”设计，所有密钥仅存在于本地。
+本系统是完全解耦的，所有私密配置仅留存本地。
 
 ```bash
-# 复制配置模板
 cp .env.example .env
 ```
 
-用编辑器打开 `.env` 文件，填入您的密钥信息。
+打开 `.env` 文件，注入机甲灵魂：
 
-⚠️ **币安 API 权限警告**：  
+- **TELEGRAM_BOT_TOKEN**: 填入刚在第一步申请的专属 Token
+- **BINANCE_API_KEY / SECRET**: 填入您的币安 API（主网或测试网）
+- **LLM_API_KEY**: 填入大语言模型（OpenAI / DeepSeek 等）的 API Key 和 Base URL，用于赋能机甲的语义解析大脑
+
+⚠️ **币安 API 权限警告：**  
 申请 API Key 时，仅勾选“允许读取”和“允许合约交易”。  
-**绝对禁止勾选“允许提现”！** 本程序从不需要、也永远不会要求提现权限。
+**绝对禁止勾选“允许提现”！** 本系统从不需要、也永远不会要求提现权限。  
+重要提醒：实盘API必须绑定IP,关闭提现功能。
 
-### 4. 点火启动
+#### 第四步：点火启动
 
 ```bash
-# 启动 Telegram 独立网关
+# 启动 Telegram 独立网关 (人工指挥所)
 python telegram_gateway.py
+
+# (可选) 新开一个终端窗口，启动全自动交易引擎
+python main_auto_bot.py
 ```
-
-（推荐进阶用户使用 `pm2 start telegram_gateway.py --name Quant-Bot` 进行后台守护运行）
-
----
 
 ## 🛡️ 国防级安全红线 (Security Guidelines)
 
-本项目将用户的资金安全置于绝对的第一优先级。我们内置了以下物理与逻辑防线：
+用户的资金安全是本系统的最高准则，内置以下四道核心防线：
 
-1. **密钥物理隔离**：所有的私密配置必须写入 `.env` 文件。该文件已被 `.gitignore` 永久拉黑，绝不会被意外推送到 GitHub。
-2. **Algo 接口防漏**：所有风控挂单严格采用币安最新 `fapi/v1/algoOrder` 接口，强制要求 `CONDITIONAL` 和 `closePosition=true` 属性，防止止损单变反向开仓。
-3. **单日亏损熔断**：风控引擎实时监控（Margin Ratio），触发阈值强制停止开仓。
-4. **日志自动脱敏**：任何打印到终端或文件的日志，API Key 均会进行 `***` 遮罩处理。
-
----
-
-## 📊 路线图与开发状态
-
-| 核心模块 | 功能描述 | 状态 |
-|----------|----------|------|
-| SMC 行情雷达 | 抓取资金费率、OI，推演订单块与盈亏比 | ✅ 完成 |
-| UI 渲染引擎 | 彭博级树状资产与持仓盈亏结算面板 | ✅ 完成 |
-| 智能风控挂载 | 多空智能识别，独立补挂止损/止盈 | ✅ 完成 |
-| 全天候平仓器 | 兼容 One-way 与 Hedge 模式的一键熔断 | ✅ 完成 |
-| 多模型融合 | 接入 LSTM / Transformer 本地走势预测 | 🔄 优化中 |
+- **物理隔离**：所有的私密配置必须写入 `.env` 文件，该文件已被 `.gitignore` 永久拉黑，绝不会被推送到 GitHub。
+- **拔网线级全撤全平**：触发 `/closeall` 时，优先强制撤销所有待触发挂单释放保证金，再进行三段式暴力重试平仓。
+- **防插针挂单**：风控挂单严格采用币安最新 `fapi/v1/algoOrder` 接口，强制绑定 `CONDITIONAL` 和 `closePosition=true` 属性，彻底杜绝止损单变反向开仓。
+- **日志脱敏**：任何打印到终端或输出文件的日志，敏感 API Key 均会进行遮罩处理。
 
 ---
 
-## 📞 技术支持与联系
+## 📞 技术支持与声明
 
-- **开发者**：lingge66 和 AI 团队
-- **运行环境要求**：Ubuntu/Debian Linux, Python 3.9+
+**主架构师**：lingge66 & AI 团队
 
----
+**环境要求**：Ubuntu/Debian Linux, Python 3.9+
 
-## ⚠️ 免责声明
-
-加密货币合约交易具有极高风险。本项目代码开源仅供技术交流与比赛演示。在使用实盘（Live）模式前，请务必在 Testnet（测试网）充分验证。您对自己的所有交易结果负完全责任。
+**免责声明**：加密货币合约交易具有极高风险。本项目代码开源仅供技术交流与比赛演示。在使用实盘（Live）模式前，请务必在 Testnet（测试网）充分验证。您对自己的所有交易行为及结果负完全责任。
 
 ---
 
