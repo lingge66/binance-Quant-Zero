@@ -354,6 +354,11 @@ def sanitize_ai_output(text: str) -> str:
         return "⚠️ **参谋部拦截器触发**：引擎遭遇底层格式泄露。请领哥再发一次刚才的指令！"
     return text
 
+import re
+import yaml
+from pathlib import Path
+from aiogram.filters import CommandStart, Command
+
 # ==========================================
 # 🥇 第一道防线：新手向导 (一键触控引导版)
 # ==========================================
@@ -369,8 +374,10 @@ async def send_welcome(message: types.Message):
 请下达您的战术指令：
 
 ⚡️ **【物理控制台】(零延迟点触指令)**
-👉 /balance ：调出彭博级资产与多空持仓面板 (或发 `查账``资产``余额`)
-👉 /closeall ：最高危！一键市价熔断所有仓位 (或发 `快跑``平仓``清仓`)
+👉 /balance ：调出彭博级资产与多空持仓面板 (或发 `查账` `资产`)
+👉 /closeall ：最高危！一键市价熔断所有仓位 (或发 `快跑` `平仓`)
+👉 /logs 15 ：调取底层引擎实时运行日志 (或发 `看日志`)
+👉 /add_symbol ：将新标的纳入最高雷达监控 (或发 `添加监控 SOL`)
 
 ⚔️ **【实盘狙击指令】(支持自然语言与U本位自动换算)**
 💬 `做空 1000U 的 BTC，止损 75000`
@@ -391,6 +398,79 @@ async def send_welcome(message: types.Message):
 📡 **等待指令中... (Type your command)**
 """
     await message.reply(welcome_text, parse_mode="Markdown")
+
+# ==========================================
+# 🌟 [展示级功能] 特工雷达：中英双语动态增减交易对
+# ==========================================
+@dp.message(lambda msg: msg.text and re.match(r'^(?:/add_symbol|添加监控|增加标的|监控|添加)\s*([a-zA-Z0-9/]+)$', msg.text.strip(), re.IGNORECASE))
+async def add_symbol_handler(message: types.Message):
+    """动态添加监控标的，彰显 Agent 交互感 (支持中文自然语言及无空格盲打)"""
+    match = re.match(r'^(?:/add_symbol|添加监控|增加标的|监控|添加)\s*([a-zA-Z0-9/]+)$', message.text.strip(), re.IGNORECASE)
+    symbol = match.group(1).replace('/', '').upper()
+    if not symbol.endswith('USDT'): symbol += 'USDT'  # 自动补全 USDT
+
+    config_path = Path(__file__).parent / "config" / "config.yaml"
+
+    if not config_path.exists():
+        await message.reply("❌ **系统异常**：未能定位到雷达配置文件 `config/config.yaml`")
+        return
+
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            cfg = yaml.safe_load(f) or {}
+
+        if 'auto_trade' not in cfg: cfg['auto_trade'] = {}
+        if 'symbols' not in cfg['auto_trade']: cfg['auto_trade']['symbols'] = []
+
+        if symbol not in cfg['auto_trade']['symbols']:
+            cfg['auto_trade']['symbols'].append(symbol)
+            with open(config_path, 'w', encoding='utf-8') as f:
+                yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False)
+            
+            await message.reply(f"✅ **指令确认：雷达扩容**\n特工引擎已听从您的指挥，将 `{symbol}` 纳入最高级别行情监控序列！底层配置已热更新。", parse_mode="Markdown")
+        else:
+            await message.reply(f"ℹ️ **重复指令**\n指挥官，`{symbol}` 早已在我们的监控雷达中了。")
+    except Exception as e:
+        await message.reply(f"❌ 动态写入配置失败：{e}")
+
+# ==========================================
+# 🌟 [展示级功能] 极客终端：中英双语查日志
+# ==========================================
+@dp.message(lambda msg: msg.text and re.match(r'^(?:/logs|查看日志|看日志|系统日志|日志)(?:\s+(\d+))?$', msg.text.strip()))
+async def logs_handler(message: types.Message):
+    """远程拉取底层日志，彰显硬核透明度 (支持中文自然语言)"""
+    match = re.match(r'^(?:/logs|查看日志|看日志|系统日志|日志)(?:\s+(\d+))?$', message.text.strip())
+    
+    lines_str = match.group(1)
+    lines = int(lines_str) if lines_str else 20
+    if lines > 100: lines = 100
+
+    log_file = Path(__file__).parent / "logs" / "agent.log" 
+    
+    if not log_file.exists():
+        await message.reply("⚠️ **日志系统离线**\n未找到底层日志文件。请确认自动交易引擎是否已启动。")
+        return
+
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            all_lines = f.readlines()
+            last_lines = all_lines[-lines:]
+            text = "".join(last_lines)
+
+            if not text.strip():
+                await message.reply("📭 当前日志文件为空。")
+                return
+
+            if len(text) > 3800:
+                text = text[-3800:]
+
+            await message.reply(f"🖥️ **底层引擎实时日志 (最近 {lines} 行):**\n```text\n{text}\n```", parse_mode="Markdown")
+    except Exception as e:
+        await message.reply(f"❌ 读取日志扇区失败：{e}")
+
+# ==========================================
+# (下方保留你原本处理其他 AI 对话和核心开单的逻辑...)
+# ==========================================
 
 @dp.message(or_f(Command("balance"), F.text.in_({"查账", "余额", "查余额", "资产", "持仓"})))
 async def fast_balance(message: types.Message):
@@ -582,6 +662,81 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     logging.info("🚀 领哥机甲·独立网关点火起飞，独占电报频段！")
     await dp.start_polling(bot)
+import re
+import yaml
+from pathlib import Path
 
+# ==========================================
+# 🌟 [展示级功能] 特工雷达：中英双语动态增减交易对
+# ==========================================
+@dp.message(lambda msg: msg.text and re.match(r'^(?:/add_symbol|添加监控|增加标的|监控|添加)\s+([a-zA-Z0-9/]+)$', msg.text.strip(), re.IGNORECASE))
+async def add_symbol_handler(message: types.Message):
+    """动态添加监控标的，彰显 Agent 交互感 (支持中文自然语言)"""
+    # 提取用户意图中的币种名称
+    match = re.match(r'^(?:/add_symbol|添加监控|增加标的|监控|添加)\s+([a-zA-Z0-9/]+)$', message.text.strip(), re.IGNORECASE)
+    symbol = match.group(1).replace('/', '').upper()
+    if not symbol.endswith('USDT'): symbol += 'USDT'  # 自动补全 USDT 防呆
+
+    config_path = Path(__file__).parent / "config" / "config.yaml"
+
+    if not config_path.exists():
+        await message.reply("❌ **系统异常**：未能定位到雷达配置文件 `config/config.yaml`")
+        return
+
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            cfg = yaml.safe_load(f) or {}
+
+        if 'auto_trade' not in cfg: cfg['auto_trade'] = {}
+        if 'symbols' not in cfg['auto_trade']: cfg['auto_trade']['symbols'] = []
+
+        if symbol not in cfg['auto_trade']['symbols']:
+            cfg['auto_trade']['symbols'].append(symbol)
+            with open(config_path, 'w', encoding='utf-8') as f:
+                yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False)
+            
+            await message.reply(f"✅ **指令确认：雷达扩容**\n特工引擎已听从您的指挥，将 `{symbol}` 纳入最高级别行情监控序列！底层配置已热更新。", parse_mode="Markdown")
+        else:
+            await message.reply(f"ℹ️ **重复指令**\n指挥官，`{symbol}` 早已在我们的监控雷达中了。")
+    except Exception as e:
+        await message.reply(f"❌ 动态写入配置失败：{e}")
+
+
+# ==========================================
+# 🌟 [展示级功能] 极客终端：中英双语查日志
+# ==========================================
+@dp.message(lambda msg: msg.text and re.match(r'^(?:/logs|查看日志|看日志|系统日志|日志)(?:\s+(\d+))?$', msg.text.strip()))
+async def logs_handler(message: types.Message):
+    """远程拉取底层日志，彰显硬核透明度 (支持中文自然语言)"""
+    match = re.match(r'^(?:/logs|查看日志|看日志|系统日志|日志)(?:\s+(\d+))?$', message.text.strip())
+    
+    # 提取想要查看的行数，如果没有输数字，默认看最后 20 行
+    lines_str = match.group(1)
+    lines = int(lines_str) if lines_str else 20
+    if lines > 100: lines = 100  # 防止 Telegram 消息超长炸群
+
+    # 自动定位日志文件（确保这里与你实际的日志路径一致，通常在 logs/agent.log）
+    log_file = Path(__file__).parent / "logs" / "agent.log" 
+    
+    if not log_file.exists():
+        await message.reply("⚠️ **日志系统离线**\n未找到底层日志文件。请确认自动交易引擎是否已启动。")
+        return
+
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            all_lines = f.readlines()
+            last_lines = all_lines[-lines:]
+            text = "".join(last_lines)
+
+            if not text.strip():
+                await message.reply("📭 当前日志文件为空。")
+                return
+
+            if len(text) > 3800:
+                text = text[-3800:]
+
+            await message.reply(f"🖥️ **底层引擎实时日志 (最近 {lines} 行):**\n```text\n{text}\n```", parse_mode="Markdown")
+    except Exception as e:
+        await message.reply(f"❌ 读取日志扇区失败：{e}")
 if __name__ == "__main__":
     asyncio.run(main())
