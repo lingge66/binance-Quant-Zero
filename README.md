@@ -120,11 +120,143 @@ python main_auto_bot.py
 
 ## 📞 技术支持与声明
 
-**主架构师**：lingge66 & AI 团队
+**主架构师**：lingge66@shangdu2005 & AI 团队
 
 **环境要求**：Ubuntu/Debian Linux, Python 3.9+
 
 **免责声明**：加密货币合约交易具有极高风险。本项目代码开源仅供技术交流与比赛演示。在使用实盘（Live）模式前，请务必在 Testnet（测试网）充分验证。您对自己的所有交易行为及结果负完全责任。
+
+---
+
+## 🌍 English Version
+
+# 🌌 Quant-Zero V1.0 Full Edition
+**Binance AI Trading Signal & SMC Risk Control Agent**
+
+An AI-driven trading agent based on OpenClaw, designed for Binance clients and quantitative enthusiasts.
+This project integrates **large language model semantic parsing**, **SMC institutional-level market analysis**, and **Bloomberg Terminal-like UI panels**, completely revolutionizing the interactive experience of traditional quantitative robots.
+
+---
+
+## 🎯 Core Features
+
+- **🧠 SMC Institutional Advisory Brain**: Captures 48H on-chain/market data, AI automatically deduces liquidity pools (Liquidity Sweep) and order blocks, outputting high risk-reward tactical plans.
+- **⚡️ Instant Natural Language Execution**: Supports natural language positions (e.g., "short 1000U worth of BTC"), automatically calculates position size and converts to USD value.
+- **🛡️ God-View Independent Risk Control**: Completely告别“naked trading”！ Intelligently identifies long/short directions, independently and quickly supplements Algo conditional orders (take-profit/stop-loss) for existing positions to prevent flash crashes.
+- **🏦 Bloomberg-Level Treasury Terminal**: One-click `/balance` command directly renders tree-style long/short position details and real-time P&L in Telegram, giving a clear overview of account status.
+- **💥 One-Click Emergency Circuit Breaker**: Send `/closeall` command, compatible with one-way and hedge mode triple-stage violent liquidation engine instantly takes over, generating detailed "battle damage settlement report" after closing positions.
+- **🤖 Automated Trading**: Send 'start auto trading' command to launch fully automated quantitative polling engine (strategy runs unattended), strategies can be optimized at any time.
+
+---
+
+## 📁 Project Structure
+
+We adopt a rigorous modular layered architecture to ensure absolute isolation of data capture, signal analysis, and live risk control:
+
+```text
+binance-ai-agent/
+├── config/                    # Static strategies & global configurations
+│   ├── config.yaml            # Main config file (API, network, log parameters)
+│   └── symbols.yaml           # Trading pair detailed risk parameters (limits, slippage, precision)
+├── src/                       # Quantitative engine core (Core)
+│   ├── data/                  # Data collection layer (WebSocket live stream, ccxt historical data)
+│   ├── signals/               # Signal processing layer (traditional technical indicators resonance, AI model integration)
+│   ├── risk/                  # Risk engine (SMC risk logic, account status monitoring, dynamic stop-loss)
+│   └── execution/             # Trading execution layer (one-way/hedge mode intelligent adaptation, order lifecycle management)
+├── scripts/                   # Automated tasks & operations scripts
+├── tests/                     # Unit testing & boundary stress testing modules
+├── logs/                      # Runtime logs storage (isolated in gitignore)
+├── data/                      # Local data cache (candlestick snapshots, order book depth)
+├── telegram_gateway.py        # 🌟 AI semantic interaction main gateway (console entry)
+├── main_auto_bot.py           # 🤖 Fully automated quantitative polling engine (strategy unattended execution)
+├── requirements.txt           # Python dependencies list
+├── .env.example               # Environment variables & secret keys configuration example
+└── README.md                  # Mech manual
+```
+
+---
+
+## 🚀 Quick Start
+
+To run this trading mech more safely and stably, and prevent message conflicts with your existing OpenClaw or other bots, please strictly follow the following **"zero-conflict architecture"** for independent deployment.
+
+### 🤖 Method 1: OpenClaw Assistant One-Click Automated Deployment (Geek Recommended)
+
+If you're already running OpenClaw, you can directly send the following "magic spell" to your OpenClaw assistant to handle basic installation for you:
+
+**Prompt:**
+
+> "Hello, please help me deploy the 'Quant-Zero Mech' on my server. Please execute in order: 1. git clone https://github.com/lingge66/binance-ai-agent.git 2. Enter the directory and create a virtual environment with python3 -m venv quant_venv. 3. Activate the environment and pip install -r requirements.txt. 4. Copy .env.example to .env. After completion, let me know, and I'll manually configure the secret keys."
+
+### 💻 Method 2: Standard Manual Deployment Process
+
+#### Step 1: Apply for a Dedicated "Quant Mech BOT" (Isolation from Conflicts)
+
+To avoid message interception conflicts, do not use existing bot tokens.
+
+1. Go to Telegram and search for @BotFather
+2. Send `/newbot`, spend 10 seconds creating a brand new dedicated bot (e.g., `lingge_quant_bot`)
+3. Copy the obtained fresh, dedicated Bot Token
+
+#### Step 2: Clone Code & Create Independent Environment
+
+Do not pollute the system-wide Python environment; use venv to create an independent isolation zone:
+
+```bash
+git clone https://github.com/lingge66/binance-ai-agent.git
+cd binance-ai-agent
+python3 -m venv quant_venv
+source quant_venv/bin/activate  # Windows users: quant_venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+#### Step 3: 🔐 Independent .env Core Key Configuration (Highest Security Priority)
+
+This system is completely decoupled; all private configurations remain only locally.
+
+```bash
+cp .env.example .env
+```
+
+Open the `.env` file and inject the mech's soul:
+
+- **TELEGRAM_BOT_TOKEN**: Fill in the dedicated Token obtained in Step 1
+- **BINANCE_API_KEY / SECRET**: Fill in your Binance API (mainnet or testnet)
+- **LLM_API_KEY**: Fill in the large language model (OpenAI / DeepSeek, etc.) API Key and Base URL, empowering the mech's semantic analysis brain
+
+⚠️ **Binance API Permission Warning:**  
+When applying for API Key, only check "Enable Reading" and "Enable Futures Trading".  
+**Absolutely forbid checking "Enable Withdrawal"!** This system never requires, and will never require withdrawal permissions.  
+Important reminder: Live API must bind IP, disable withdrawal function.
+
+#### Step 4: Ignition Start
+
+```bash
+# Start Telegram independent gateway (manual command center)
+python telegram_gateway.py
+
+# (Optional) Open a new terminal window, start the fully automated trading engine
+python main_auto_bot.py
+```
+
+## 🛡️ Defense-Grade Security Guidelines
+
+User fund safety is the highest principle of this system, with the following four core defenses built-in:
+
+- **Physical Isolation**: All private configurations must be written into the `.env` file, which has been permanently blacklisted by `.gitignore` and will never be pushed to GitHub.
+- **Pull-the-Plug Full Cancel & Close**: When triggering `/closeall`, priority is given to forcibly canceling all pending conditional orders to release margin, followed by triple-stage violent retry liquidation.
+- **Flash-Crash Proof Order Placement**: Risk control orders strictly use Binance's latest `fapi/v1/algoOrder` interface, mandating `CONDITIONAL` and `closePosition=true` attributes, completely preventing stop-loss orders from becoming reverse opening positions.
+- **Log Desensitization**: Any logs printed to terminal or output files will have sensitive API Keys masked.
+
+---
+
+## 📞 Technical Support & Disclaimer
+
+**Lead Architect**: lingge66@shangdu2005 & AI Team
+
+**Environment Requirements**: Ubuntu/Debian Linux, Python 3.9+
+
+**Disclaimer**: Cryptocurrency futures trading carries extremely high risk. This project's code is open source for technical exchange and competition demonstration only. Before using Live mode, you must fully verify on Testnet. You are solely responsible for all your trading actions and results.
 
 ---
 
