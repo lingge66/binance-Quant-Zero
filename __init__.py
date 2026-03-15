@@ -111,7 +111,7 @@ async def get_quant_account_status() -> str:
 🛡️ **风控使用率:** `{margin_ratio:.2f}%`
 
 ---
-## 🪙 现货储备 (Spot & Wallet)
+## 🪙 保证金金库 (Spot & Wallet)
 > {assets_str}
 
 ---
