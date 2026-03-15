@@ -1,11 +1,4 @@
 """
-Copyright (c) 2026 lingge66. All rights reserved.
-This code is part of the Binance AI Agent project and is protected by copyright law.
-Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
-"""
-
-
-"""
 OpenClaw 原生技能包：Binance Quant Agent (全量解封核武版 + 原生 UI 丝滑渲染)
 功能：全维度暴露量化底座能力（风控试算、本地预测、执行单、极速查账 UI）。
 """

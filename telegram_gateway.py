@@ -1,10 +1,3 @@
-"""
-Copyright (c) 2026 lingge66. All rights reserved.
-This code is part of the Binance AI Agent project and is protected by copyright law.
-Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
-"""
-
-
 #!/usr/bin/env python3
 import os
 import sys
@@ -414,9 +407,47 @@ async def fast_emergency_close(message: types.Message):
 async def start_auto_trading(message: types.Message):
     thinking_msg = await message.reply("⚙️ *点火中...*", parse_mode="Markdown")
     try:
+        # 先确保 arsenal 已初始化，以便读取配置
+        await arsenal.initialize()
+        
+        # 执行 PM2 启动命令
         result = os.system("cd /home/lingge/.openclaw/skills/binance_agent_lingge && pm2 start main_auto_bot.py --name Quant-AutoTrader")
-        if result == 0: await thinking_msg.edit_text("🚀 **航母已出港！** 自动化引擎启动。", parse_mode="Markdown")
-        else: await thinking_msg.edit_text(f"❌ 点火失败，PM2 返回码: {result}", parse_mode="Markdown")
+        
+        if result == 0:
+            # 读取自动交易配置
+            auto_cfg = arsenal.config.get('auto_trade', {})
+            symbols = auto_cfg.get('symbols', ["BTCUSDT"])
+            base_amount = auto_cfg.get('base_amount', 0.01)
+            rsi_oversold = auto_cfg.get('rsi_oversold', 30)
+            rsi_overbought = auto_cfg.get('rsi_overbought', 70)
+            atr_multiplier_sl = auto_cfg.get('atr_multiplier_sl', 2.0)
+            atr_multiplier_tp = auto_cfg.get('atr_multiplier_tp', 1.5)
+            interval = auto_cfg.get('interval_seconds', 15)
+            use_trend_filter = auto_cfg.get('use_trend_filter', True)
+            trend_ema = auto_cfg.get('trend_ema_period', 50)
+            trend_tf = auto_cfg.get('trend_timeframe', '1h')
+            
+            # 构建详细报告
+            report = (
+                f"🚀 **航母已出港！自动化引擎启动**\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"**策略配置**\n"
+                f"• 💰监控币种: `{', '.join(symbols)}`\n"
+                f"• 📚开仓数量: `{base_amount}`\n"
+                f"• RSI阈值: 超卖 `{rsi_oversold}` / 超买 `{rsi_overbought}`\n"
+                f"• 止损ATR倍数: `{atr_multiplier_sl}`\n"
+                f"• 止盈ATR倍数: `{atr_multiplier_tp}`\n"
+                f"• ⌛️扫描间隔: `{interval}` 秒\n"
+                f"• 趋势过滤: `{'启用' if use_trend_filter else '禁用'}`\n"
+                f"{f'  ├─ EMA周期: `{trend_ema}`' if use_trend_filter else ''}\n"
+                f"{f'  └─ 时间框架: `{trend_tf}`' if use_trend_filter else ''}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"📡 **实时日志**：`pm2 logs Quant-AutoTrader`\n"
+                f"🛡️ **风控规则**：已集成规则引擎（仓位限制、每日亏损熔断等）"
+            )
+            await thinking_msg.edit_text(report, parse_mode="Markdown")
+        else:
+            await thinking_msg.edit_text(f"❌ 点火失败，PM2 返回码: {result}", parse_mode="Markdown")
     except Exception as e:
         await thinking_msg.edit_text(f"❌ 点火失败: {e}")
 

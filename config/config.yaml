@@ -234,3 +234,19 @@ system:
     interval_hours: 24
     # 保留备份天数
     retention_days: 7
+# 自动交易配置
+auto_trade:
+  enabled: true
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+  base_amount: 0.01
+  rsi_oversold: 30
+  rsi_overbought: 70
+  atr_multiplier_sl: 2.0
+  atr_multiplier_tp: 1.5
+  interval_seconds: 15
+  max_positions_per_symbol: 1
+  use_trend_filter: true          # 是否启用趋势过滤
+  trend_ema_period: 50             # 趋势均线周期
+  trend_timeframe: '1h'            # 趋势均线时间框架
