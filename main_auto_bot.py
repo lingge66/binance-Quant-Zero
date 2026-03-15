@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """
+Copyright (c) 2026 lingge66. All rights reserved.
+This code is part of the Binance AI Agent project and is protected by copyright law.
+Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
+"""
+"""
 OpenClaw Binance Agent - 自动化 3.0 (风控完全体)
 集成规则引擎 + 动态止损止盈挂载 + 配置化 + 趋势过滤
 """

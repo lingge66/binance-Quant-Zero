@@ -1,4 +1,9 @@
 """
+Copyright (c) 2026 lingge66. All rights reserved.
+This code is part of the Binance AI Agent project and is protected by copyright law.
+Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
+"""
+"""
 OpenClaw 原生技能包：Binance Quant Agent (全量解封核武版 + 原生 UI 丝滑渲染)
 功能：全维度暴露量化底座能力（风控试算、本地预测、执行单、极速查账 UI）。
 """
@@ -121,8 +126,8 @@ async def get_quant_account_status() -> str:
 
 async def emergency_close_all_positions() -> str:
     """
-    [最高危：一键紧急平仓 - 双保险模式]
-    自动适应单向/双向模式，并对方向进行双向试探，确保平仓成功率。
+    [最高危：一键紧急平仓 - 战报结算版]
+    暴力平仓的同时，抓取平仓前一瞬间的盈亏快照，并生成详尽的资金结算清单。
     """
     await arsenal.initialize()
     exchange = arsenal.monitor.exchange
@@ -131,73 +136,76 @@ async def emergency_close_all_positions() -> str:
         positions = await arsenal.monitor.fetch_positions()
         results = []
         errors = []
+        total_realized_pnl = 0.0  # 累计本次熔断的总盈亏
 
         for p in positions:
-            if p.position_amount == 0:
+            amt_float = float(p.position_amount)
+            if amt_float == 0:
                 continue
 
-            # 清洗币种：从 "BTC/USDT:USDT" 到 "BTCUSDT"
+            # 1. 📸 战前数据快照：在仓位消失前，截取开仓价和浮动盈亏
             raw_symbol = p.symbol.split(':')[0].replace('/', '').upper()
-            # 精确格式化数量，避免精度问题
-            amt = abs(p.position_amount)
+            amt = abs(amt_float)
             amt_str = f"{amt:.8f}".rstrip('0').rstrip('.') if '.' in f"{amt:.8f}" else f"{amt:.8f}"
-            side_str = 'SELL' if p.position_amount > 0 else 'BUY'
+            
+            entry_price = float(getattr(p, 'entry_price', 0))
+            pnl = float(getattr(p, 'unrealized_pnl', getattr(p, 'unrealizedProfit', 0)))
+            pnl_str = f"+{pnl:.2f}" if pnl > 0 else f"{pnl:.2f}"
+            pnl_icon = "🟩" if pnl > 0 else "🟥" if pnl < 0 else "⬜️"
+            
+            # 判断多空方向用于UI展示
+            side_str = 'SELL' if amt_float > 0 else 'BUY'
+            p_side_attr = str(getattr(p, 'position_side', getattr(p, 'positionSide', getattr(p, 'side', '')))).upper()
+            target_pos_side = p_side_attr if p_side_attr in ['LONG', 'SHORT'] else ('LONG' if amt_float > 0 else 'SHORT')
+            dir_icon = "🟢多单" if (target_pos_side == 'LONG' or amt_float > 0) else "🔴空单"
 
-            # 尝试三种策略：先单向，再双向两种方向
             success = False
-            last_error = None
+            last_error = ""
 
-            # 策略1：单向模式（适用于 One-way Mode）
+            # 2. 🚀 执行三段式暴力平仓
             try:
-                await exchange.fapiPrivatePostOrder({
-                    'symbol': raw_symbol,
-                    'side': side_str,
-                    'type': 'MARKET',
-                    'quantity': amt_str,
-                    'reduceOnly': 'true'
-                })
-                results.append(f"✅ {p.symbol}: 成功市价平仓 {amt_str} (单向模式)")
-                continue
+                await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str, 'positionSide': target_pos_side})
+                success = True
             except Exception as e:
-                last_error = e
-                # 如果是 -2022，说明是双向模式，继续尝试双向
-                if "-2022" not in str(e) and "ReduceOnly" not in str(e):
-                    errors.append(f"❌ {p.symbol}: 单向平仓失败 - {str(e)}")
-                    continue
-
-            # 策略2 & 3：双向模式，分别尝试 LONG 和 SHORT
-            for pos_side in ['LONG', 'SHORT']:
                 try:
-                    await exchange.fapiPrivatePostOrder({
-                        'symbol': raw_symbol,
-                        'side': side_str,
-                        'type': 'MARKET',
-                        'quantity': amt_str,
-                        'positionSide': pos_side
-                    })
-                    results.append(f"✅ {p.symbol}: 成功市价平仓 {amt_str} (双向模式-{pos_side})")
+                    await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str, 'reduceOnly': 'true'})
                     success = True
-                    break
-                except Exception as e:
-                    last_error = e
-                    continue
+                except Exception as e2:
+                    try:
+                        await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str})
+                        success = True
+                    except Exception as e3:
+                        last_error = str(e3)
 
-            if not success:
-                errors.append(f"❌ {p.symbol}: 所有平仓尝试均失败 - {last_error}")
+            # 3. 📝 记录战果
+            if success:
+                total_realized_pnl += pnl
+                results.append(f"• {dir_icon} `{raw_symbol}` | 平仓数量: {amt_str}\n  └─ {pnl_icon} 结算盈亏: `{pnl_str} U` | 原开仓均价: ${entry_price:.2f}")
+            else:
+                errors.append(f"❌ `{raw_symbol}`: 平仓被币安拒绝 - {last_error}")
 
-        # 构建最终消息
+        # 4. 🏦 获取清算后的金库最新余额
+        balance = await arsenal.monitor.fetch_account_balance(force_refresh=True)
+
+        # 5. 🎨 组装彭博级结算面板
         msg_parts = []
         if results:
-            msg_parts.append("🔴 **紧急熔断执行完毕！已清空以下仓位：**\n" + "\n".join(results))
+            total_pnl_icon = "💰" if total_realized_pnl >= 0 else "🩸"
+            header = "🚨 **紧急熔断指令执行完毕 (ALL POSITIONS CLOSED)**\n━━━━━━━━━━━━━━\n"
+            body = "\n".join(results)
+            footer = f"\n━━━━━━━━━━━━━━\n{total_pnl_icon} **本次平仓总盈亏 (估)**: `{total_realized_pnl:+.2f} USDT`\n🏦 **清算后净资产**: `{balance.total_balance:.2f} USD`"
+            msg_parts.append(header + body + footer)
+            
         if errors:
-            msg_parts.append("⚠️ **以下仓位平仓失败：**\n" + "\n".join(errors))
+            msg_parts.append("\n⚠️ **【严重警报】以下仓位未能平掉，请立即登入交易所人工接管：**\n" + "\n".join(errors))
+            
         if not results and not errors:
-            msg_parts.append("🟢 当前无持仓，无需平仓。")
+            return "🟢 雷达扫描完毕，当前无持仓，无需平仓。"
 
-        return "\n\n".join(msg_parts) if msg_parts else "🟢 无操作"
+        return "".join(msg_parts)
 
     except Exception as e:
-        return f"❌ 紧急平仓遭遇全局错误: {str(e)}"
+        return f"❌ 紧急平仓遭遇全局崩溃: {str(e)}"
 
 # ==========================================
 # 🧠 第三层：战术参谋 (行情与预测)
