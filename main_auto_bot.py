@@ -26,7 +26,21 @@ from src.risk.account_monitor import AccountMonitor
 from src.execution.order_manager import OrderManager, OrderType, OrderSide
 from src.risk.rule_engine import RiskRuleEngine, TradeContext, AccountContext
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# ==========================================
+# 📡 核心引流：强制将心跳日志写入同级 logs 文件夹
+# ==========================================
+BASE_DIR = Path(__file__).resolve().parent
+log_dir = BASE_DIR / "logs"
+log_dir.mkdir(exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_dir / "agent.log", encoding='utf-8', mode='a'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger("AutoBot_V3")
 
 # ==========================================
