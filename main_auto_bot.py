@@ -37,7 +37,8 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_dir / "agent.log", encoding='utf-8', mode='a'),
+        # 强制写死到 openclaw 这个主目录的 logs 里
+        logging.FileHandler("/home/lingge/.openclaw/skills/binance_agent_lingge/logs/agent.log", encoding='utf-8', mode='a'),
         logging.StreamHandler()
     ]
 )
@@ -117,10 +118,10 @@ async def run_auto_bot_v3():
                     current_rsi = df['rsi'].iloc[-1]
                     current_atr = df['atr'].iloc[-1]
                     
-                    # 2. 趋势过滤（可选）
+                    # 2. 趋势方向探测 (雷达扫描)
                     trend_allowed = True
+                    trend_direction = "unknown"
                     if use_trend_filter:
-                        # 获取大周期K线数据（例如1小时）用于EMA计算
                         trend_params = {'symbol': symbol.replace('/', ''), 'interval': trend_timeframe, 'limit': 100}
                         trend_klines = await monitor._safe_api_call(monitor.exchange.fapiPublicGetKlines, trend_params)
                         df_trend = pd.DataFrame([[k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])] for k in trend_klines],
@@ -128,38 +129,42 @@ async def run_auto_bot_v3():
                         df_trend['ema'] = df_trend['close'].ewm(span=trend_ema_period, adjust=False).mean()
                         latest_ema = df_trend['ema'].iloc[-1]
                         
-                        # 确定趋势方向：价格在EMA之上为上升趋势，之下为下降趋势
                         if current_price > latest_ema:
                             trend_direction = "up"
                         else:
                             trend_direction = "down"
-                        
                         logger.info(f"📊 {symbol} 趋势方向: {trend_direction} (EMA{trend_ema_period}: {latest_ema:.2f})")
-                        
-                        # 只允许顺趋势开仓
-                        if signal_side == OrderSide.BUY and trend_direction == "down":
-                            trend_allowed = False
-                            logger.info(f"⏭️ {symbol} 逆趋势做多，跳过")
-                        elif signal_side == OrderSide.SELL and trend_direction == "up":
-                            trend_allowed = False
-                            logger.info(f"⏭️ {symbol} 逆趋势做空，跳过")
+
+                    # 3. RSI 动能信号生成 (拔枪)
+                    signal_side = None  
                     
-                    # 3. 生成信号
-                    signal_side = None
                     if current_rsi < rsi_oversold:
                         signal_side = OrderSide.BUY
                     elif current_rsi > rsi_overbought:
                         signal_side = OrderSide.SELL
-                    
-                    # 演示模式：首轮若无信号且无持仓，强制开空（便于测试）
+                        
+                    # [测试后门] 演示模式：首轮强制开空
                     if signal_side is None and iteration == 1:
                         signal_side = OrderSide.SELL
-                        logger.warning("⚠️ [演示模式] 触发首轮模拟信号")
-                    
+                        logger.warning("⚠️ [演示模式] 触发首轮模拟强制做空信号")
+                        
+                    # 4. 顺势过滤拦截 (防弹衣)
+                    # 如果有信号，必须检查是否和当前大趋势冲突
+                    if use_trend_filter and signal_side is not None:
+                        if signal_side == OrderSide.BUY and trend_direction == "down":
+                            trend_allowed = False
+                            logger.info(f"⏭️ {symbol} 逆势做多(趋势向下)被拦截，跳过")
+                        elif signal_side == OrderSide.SELL and trend_direction == "up":
+                            trend_allowed = False
+                            logger.info(f"⏭️ {symbol} 逆势做空(趋势向上)被拦截，跳过")
+
+                    # 5. 最终决断：无信号或被拦截，直接进入下一轮扫描
                     if signal_side is None or not trend_allowed:
                         continue
-                    
-                    # 4. 检查已有持仓
+                        
+                    # ---------------- 极速修复：核心大脑逻辑结束 ----------------
+
+                    # 6. 检查已有持仓 (这里接回你原来的代码)
                     positions = await monitor.fetch_positions()
                     existing = [p for p in positions if p.symbol == symbol and p.position_amount != 0]
                     if len(existing) >= max_positions_per_symbol:
