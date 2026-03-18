@@ -45,7 +45,7 @@ binance-Quant-Zero/
 如果您已经在运行 OpenClaw，可以直接向您的 OpenClaw 助手发送以下“魔法咒语”，让它为您代劳基础安装：
 
 完成后请告诉我，我将手动配置 .env 密钥并点火起飞。
-> "你好，请帮我在服务器上部署『领哥量化机甲』。请依次执行：1. git clone https://github.com/lingge66/binance-Quant-Zero.git 2. 进入目录并用 python3 -m venv quant_venv 创建虚拟环境。3. 激活环境并 pip install -r requirements.txt。4. 将 .env.example 复制为 .env。完成后告诉我，我将手动去配置密钥。"检查服务器是否安装了 pm2，如果没有请提示我，如果一起准备就绪请回复我是否执行启动命令：python telegram_gateway.py
+> "你好，请帮我在服务器上部署『领哥量化机甲』。请依次执行：1. git clone https://github.com/lingge66/binance-Quant-Zero.git 2. 进入目录并用 python3 -m venv quant_venv 创建虚拟环境。3. 激活环境并 pip install -r requirements.txt。4. 将 .env.example 复制为 .env。完成后告诉我，如回复你.env已完成填写，请回复我是否执行启动命令：python telegram_gateway.py
 
 ### 💻 方式二：标准手动部署流程
 
