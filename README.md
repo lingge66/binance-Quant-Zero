@@ -22,24 +22,16 @@
 我们采用了严谨的模块化分层架构，确保数据抓取、信号推演与实盘风控的绝对隔离：
 
 ```text
-binance-ai-agent/
-├── config/                    # 静态策略与全局配置
-│   ├── config.yaml            # 主配置文件 (API、网络、日志参数)
-│   └── symbols.yaml           # 交易对详细风控参数 (限额、滑点、精度)
-├── src/                       # 量化底座引擎核心 (Core)
-│   ├── data/                  # 数据采集层 (WebSocket 实盘流, ccxt 历史数据)
-│   ├── signals/               # 信号处理层 (传统技术指标共振, AI 模型对接)
-│   ├── risk/                  # 风控引擎 (SMC风控逻辑, 账户状态监控, 动态止损)
-│   └── execution/             # 交易执行层 (单/双向持仓智能适配, 订单生命周期管理)
-├── scripts/                   # 自动化任务与运维脚本
-├── tests/                     # 单元测试与边界压测模块
-├── logs/                      # 运行日志存储 (已在 gitignore 中隔离)
-├── data/                      # 本地数据缓存 (K线快照、盘口深度)
-├── telegram_gateway.py        # 🌟 AI 语义交互主网关 (控制台入口)
-├── main_auto_bot.py           # 🤖 全自动量化轮询引擎 (策略无人值守执行)
-├── requirements.txt           # Python 依赖清单
-├── .env.example               # 环境变量与密钥配置示例
-└── README.md                  # 机甲说明书
+binance-Quant-Zero/
+├── config/                # 静态策略与全局配置 (symbols.yaml等)
+├── src/                   # 量化底座引擎核心 (Data, Signals, Risk, Execution)
+├── logs/                  # 运行日志存储 (自适应路径，已在 gitignore 中隔离)
+├── telegram_gateway.py    # 🌟 AI 语义交互主网关 (人工指挥入口)
+├── main_auto_bot.py       # 🤖 全自动量化轮询引擎 (策略无人值守执行)
+├── quant_engine.py        # 🔌 独立引擎主板 (开源适配版核心接驳器)
+├── requirements.txt       # Python 依赖清单
+├── .env.example           # 环境变量与密钥配置模板
+└── README.md              # 本机甲说明书
 ```
 
 ---
@@ -76,6 +68,8 @@ cd binance-Quant-Zero
 python3 -m venv quant_venv
 source quant_venv/bin/activate  # Windows 用户: quant_venv\Scripts\activate
 pip install -r requirements.txt
+# 安装 PM2 进程守护 (需先安装 Node.js)
+npm install -g pm2
 ```
 
 #### 第三步：🔐 独立配置 .env 核心密钥 (最高安全优先级)
@@ -102,6 +96,8 @@ cp .env.example .env
 ```bash
 # 启动 Telegram 独立网关 (人工指挥所)
 python telegram_gateway.py
+## 建议使用 PM2 启动网关，确保 7x24 小时在线
+pm2 start telegram_gateway.py --name quant-zero-gateway
 
 # (可选) 新开一个终端窗口，启动全自动交易引擎
 python main_auto_bot.py
@@ -154,24 +150,16 @@ This project integrates **large language model semantic parsing**, **SMC institu
 We adopt a rigorous modular layered architecture to ensure absolute isolation of data capture, signal analysis, and live risk control:
 
 ```text
-binance-ai-agent/
-├── config/                    # Static strategies & global configurations
-│   ├── config.yaml            # Main config file (API, network, log parameters)
-│   └── symbols.yaml           # Trading pair detailed risk parameters (limits, slippage, precision)
-├── src/                       # Quantitative engine core (Core)
-│   ├── data/                  # Data collection layer (WebSocket live stream, ccxt historical data)
-│   ├── signals/               # Signal processing layer (traditional technical indicators resonance, AI model integration)
-│   ├── risk/                  # Risk engine (SMC risk logic, account status monitoring, dynamic stop-loss)
-│   └── execution/             # Trading execution layer (one-way/hedge mode intelligent adaptation, order lifecycle management)
-├── scripts/                   # Automated tasks & operations scripts
-├── tests/                     # Unit testing & boundary stress testing modules
-├── logs/                      # Runtime logs storage (isolated in gitignore)
-├── data/                      # Local data cache (candlestick snapshots, order book depth)
-├── telegram_gateway.py        # 🌟 AI semantic interaction main gateway (console entry)
-├── main_auto_bot.py           # 🤖 Fully automated quantitative polling engine (strategy unattended execution)
-├── requirements.txt           # Python dependencies list
-├── .env.example               # Environment variables & secret keys configuration example
-└── README.md                  # Mech manual
+binance-Quant-Zero/
+├── config/                # 静态策略与全局配置 (symbols.yaml等)
+├── src/                   # 量化底座引擎核心 (Data, Signals, Risk, Execution)
+├── logs/                  # 运行日志存储 (自适应路径，已在 gitignore 中隔离)
+├── telegram_gateway.py    # 🌟 AI 语义交互主网关 (人工指挥入口)
+├── main_auto_bot.py       # 🤖 全自动量化轮询引擎 (策略无人值守执行)
+├── quant_engine.py        # 🔌 独立引擎主板 (开源适配版核心接驳器)
+├── requirements.txt       # Python 依赖清单
+├── .env.example           # 环境变量与密钥配置模板
+└── README.md              # 本机甲说明书
 ```
 
 ---
@@ -208,6 +196,8 @@ cd binance-Quant-Zero
 python3 -m venv quant_venv
 source quant_venv/bin/activate  # Windows users: quant_venv\Scripts\activate
 pip install -r requirements.txt
+# 安装 PM2 进程守护 (需先安装 Node.js)
+npm install -g pm2
 ```
 
 #### Step 3: 🔐 Independent .env Core Key Configuration (Highest Security Priority)
@@ -234,6 +224,8 @@ Important reminder: Live API must bind IP, disable withdrawal function.
 ```bash
 # Start Telegram independent gateway (manual command center)
 python telegram_gateway.py
+# 建议使用 PM2 启动网关，确保 7x24 小时在线
+pm2 start telegram_gateway.py --name quant-zero-gateway
 
 # (Optional) Open a new terminal window, start the fully automated trading engine
 python main_auto_bot.py
