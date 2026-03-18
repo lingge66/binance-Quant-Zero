@@ -71,8 +71,8 @@ binance-ai-agent/
 切勿污染系统全局 Python 环境，请使用 venv 创建独立隔离区：
 
 ```bash
-git clone https://github.com/lingge66/binance-ai-agent.git
-cd binance-ai-agent
+git clone https://github.com/lingge66/binance-Quant-Zero.git
+cd binance-Quant-Zero
 python3 -m venv quant_venv
 source quant_venv/bin/activate  # Windows 用户: quant_venv\Scripts\activate
 pip install -r requirements.txt
@@ -203,8 +203,8 @@ To avoid message interception conflicts, do not use existing bot tokens.
 Do not pollute the system-wide Python environment; use venv to create an independent isolation zone:
 
 ```bash
-git clone https://github.com/lingge66/binance-ai-agent.git
-cd binance-ai-agent
+git clone https://github.com/lingge66/binance-Quant-Zero.git
+cd binance-Quant-Zero
 python3 -m venv quant_venv
 source quant_venv/bin/activate  # Windows users: quant_venv\Scripts\activate
 pip install -r requirements.txt
