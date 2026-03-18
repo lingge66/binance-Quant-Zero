@@ -1,11 +1,4 @@
 """
-Copyright (c) 2026 lingge66. All rights reserved.
-This code is part of the Binance AI Agent project and is protected by copyright law.
-Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
-"""
-
-
-"""
 Telegram通知器 - 通过Telegram Bot发送通知
 
 功能：

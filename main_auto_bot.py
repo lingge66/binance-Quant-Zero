@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Copyright (c) 2026 lingge66. All rights reserved.
-This code is part of the Binance AI Agent project and is protected by copyright law.
-Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
+This code is part of the Binance AI Agent project.
+Open Source Version - Adaptable for all environments.
 """
 """
 OpenClaw Binance Agent - 自动化 3.0 (风控完全体)
@@ -11,15 +11,20 @@ OpenClaw Binance Agent - 自动化 3.0 (风控完全体)
 
 import os
 import sys
+import time    # 🛠️ 关键修复 1：补齐缺失的 time 模块
 import asyncio
 import logging
 import aiohttp
 import pandas as pd
 from pathlib import Path
 
-# 添加项目根目录到Python路径
-project_root = Path(__file__).parent.parent
+# ==========================================
+# 🛠️ 动态路径破解：适应任何用户的环境
+# ==========================================
+BASE_DIR = Path(__file__).resolve().parent
+project_root = BASE_DIR.parent
 sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(BASE_DIR))  # 确保能找到同级目录的 src 和 config
 
 from config.config_manager import ConfigManager
 from src.risk.account_monitor import AccountMonitor
@@ -27,18 +32,18 @@ from src.execution.order_manager import OrderManager, OrderType, OrderSide
 from src.risk.rule_engine import RiskRuleEngine, TradeContext, AccountContext
 
 # ==========================================
-# 📡 核心引流：强制将心跳日志写入同级 logs 文件夹
+# 📡 核心引流：自适应日志路径
 # ==========================================
-BASE_DIR = Path(__file__).resolve().parent
 log_dir = BASE_DIR / "logs"
 log_dir.mkdir(exist_ok=True)
+log_file = log_dir / "agent.log"
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        # 强制写死到 openclaw 这个主目录的 logs 里
-        logging.FileHandler("/home/lingge/.openclaw/skills/binance_agent_lingge/logs/agent.log", encoding='utf-8', mode='a'),
+        # 🛠️ 关键修复 2：彻底移除硬编码绝对路径，使用自适应路径
+        logging.FileHandler(log_file, encoding='utf-8', mode='a'),
         logging.StreamHandler()
     ]
 )
@@ -65,7 +70,7 @@ def calculate_indicators(df: pd.DataFrame):
     ], axis=1).max(axis=1)
     df['atr'] = df['tr'].rolling(window=14).mean()
     
-    # EMA 用于趋势过滤（假设已有收盘价）
+    # EMA 用于趋势过滤
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
     return df
 
@@ -96,9 +101,9 @@ async def run_auto_bot_v3():
     atr_multiplier_tp = auto_cfg.get('atr_multiplier_tp', 1.5)
     interval_seconds = auto_cfg.get('interval_seconds', 15)
     max_positions_per_symbol = auto_cfg.get('max_positions_per_symbol', 1)
-    use_trend_filter = auto_cfg.get('use_trend_filter', True)  # 是否启用趋势过滤
-    trend_ema_period = auto_cfg.get('trend_ema_period', 50)    # 趋势均线周期
-    trend_timeframe = auto_cfg.get('trend_timeframe', '1h')    # 趋势均线时间框架
+    use_trend_filter = auto_cfg.get('use_trend_filter', True)
+    trend_ema_period = auto_cfg.get('trend_ema_period', 50)
+    trend_timeframe = auto_cfg.get('trend_timeframe', '1h')
 
     try:
         iteration = 1
@@ -149,7 +154,6 @@ async def run_auto_bot_v3():
                         logger.warning("⚠️ [演示模式] 触发首轮模拟强制做空信号")
                         
                     # 4. 顺势过滤拦截 (防弹衣)
-                    # 如果有信号，必须检查是否和当前大趋势冲突
                     if use_trend_filter and signal_side is not None:
                         if signal_side == OrderSide.BUY and trend_direction == "down":
                             trend_allowed = False
@@ -161,20 +165,18 @@ async def run_auto_bot_v3():
                     # 5. 最终决断：无信号或被拦截，直接进入下一轮扫描
                     if signal_side is None or not trend_allowed:
                         continue
-                        
-                    # ---------------- 极速修复：核心大脑逻辑结束 ----------------
 
-                    # 6. 检查已有持仓 (这里接回你原来的代码)
+                    # 6. 检查已有持仓
                     positions = await monitor.fetch_positions()
                     existing = [p for p in positions if p.symbol == symbol and p.position_amount != 0]
                     if len(existing) >= max_positions_per_symbol:
                         logger.info(f"⏭️ {symbol} 已有 {len(existing)} 个持仓（上限{max_positions_per_symbol}），跳过开仓")
                         continue
                     
-                    # 5. 获取账户余额
+                    # 7. 获取账户余额
                     balance = await monitor.fetch_account_balance(force_refresh=True)
                     
-                    # 6. 构建风控上下文
+                    # 8. 构建风控上下文
                     trade_ctx = TradeContext(
                         symbol=symbol,
                         position_side="long" if signal_side == OrderSide.BUY else "short",
@@ -183,11 +185,10 @@ async def run_auto_bot_v3():
                         position_size=base_amount,
                         unrealized_pnl=0.0,
                         realized_pnl=0.0,
-                        leverage=1.0,  # 可从配置文件读取实际杠杆
-                        timestamp=int(asyncio.get_event_loop().time() * 1000)
+                        leverage=1.0, 
+                        timestamp=int(time.time() * 1000)
                     )
                     
-                    # 构建账户上下文（将现有持仓转换为TradeContext列表）
                     open_trades = []
                     for p in positions:
                         if p.position_amount != 0:
@@ -198,7 +199,7 @@ async def run_auto_bot_v3():
                                 current_price=p.mark_price,
                                 position_size=p.position_amount,
                                 unrealized_pnl=p.unrealized_pnl,
-                                realized_pnl=0.0,  # 已实现盈亏需要从别处获取
+                                realized_pnl=0.0, 
                                 leverage=p.leverage,
                                 timestamp=int(time.time() * 1000)
                             ))
@@ -208,22 +209,22 @@ async def run_auto_bot_v3():
                         available_balance=balance.available_balance,
                         margin_ratio=balance.margin_ratio,
                         total_position_value=sum(p.position_amount * p.mark_price for p in positions if p.position_amount != 0),
-                        daily_pnl=0.0,  # 建议从数据库或历史记录获取
+                        daily_pnl=0.0, 
                         weekly_pnl=0.0,
                         open_positions=open_trades,
                         timestamp=balance.timestamp
                     )
                     
-                    # 7. 规则引擎评估
+                    # 9. 规则引擎评估
                     rule_results = await rule_engine.evaluate_all_rules(trade_ctx, account_ctx, record_trade_attempt=True)
                     if rule_engine.has_critical_failure(rule_results) or any(not r.passed for r in rule_results):
                         logger.warning(f"🛑 {symbol} 风控未通过，跳过开仓")
                         for r in rule_results:
                             if not r.passed:
-                                logger.warning(f"   规则 {r.rule_name}: {r.message}")
+                                logger.warning(f"  规则 {r.rule_name}: {r.message}")
                         continue
                     
-                    # 8. 动态计算止损止盈
+                    # 10. 动态计算止损止盈
                     sl_distance = current_atr * atr_multiplier_sl
                     tp_distance = current_atr * atr_multiplier_tp
                     if signal_side == OrderSide.BUY:
@@ -233,14 +234,14 @@ async def run_auto_bot_v3():
                         sl_price = current_price + sl_distance
                         tp_price = current_price - tp_distance
                     
-                    # 9. 执行开仓
+                    # 11. 执行开仓
                     logger.info(f"🛡️ 风控校验通过，准备开仓 {symbol} {signal_side.value} 数量 {base_amount}")
                     try:
                         order = await manager.create_order(symbol, OrderType.MARKET, signal_side, base_amount)
                         executed = await manager.submit_order(order.order_id, dry_run=False)
                         order_id = executed.metadata.get('exchange_order_id', 'N/A')
                         
-                        # 10. 挂载止损单
+                        # 挂载止损单
                         try:
                             sl_order = await manager.create_order(
                                 symbol, OrderType.STOP_LOSS,
@@ -252,7 +253,7 @@ async def run_auto_bot_v3():
                         except Exception as e:
                             logger.error(f"  止损单挂载失败: {e}")
                         
-                        # 11. 挂载止盈单
+                        # 挂载止盈单
                         try:
                             tp_order = await manager.create_order(
                                 symbol, OrderType.TAKE_PROFIT,
@@ -264,7 +265,7 @@ async def run_auto_bot_v3():
                         except Exception as e:
                             logger.error(f"  止盈单挂载失败: {e}")
                         
-                        # 12. 发送通知
+                        # 发送战报
                         await send_enhanced_notification(
                             symbol, signal_side.value.upper(),
                             base_amount, current_price,
@@ -280,7 +281,7 @@ async def run_auto_bot_v3():
             
             iteration += 1
             await asyncio.sleep(interval_seconds)
-    
+            
     except KeyboardInterrupt:
         logger.info("程序退出")
     finally:
@@ -290,9 +291,13 @@ async def run_auto_bot_v3():
 async def send_enhanced_notification(symbol, side, amt, price, sl, tp, oid):
     """发送战报"""
     bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-    chat_id = os.getenv('TELEGRAM_CHAT_ID')
-    proxy = os.getenv('HTTP_PROXY')
+    chat_id = os.getenv('TELEGRAM_CHAT_ID')  # 💡 用户需在 .env 填入自己的 CHAT_ID
+    proxy = os.getenv('TELEGRAM_PROXY')
     
+    # 如果没有配置推送，则静默跳过
+    if not bot_token or not chat_id:
+        return
+
     msg = (
         f"🛡️ **量化大脑 3.0 自动开仓**\n"
         f"━━━━━━━━━━━━━━\n"
@@ -304,17 +309,20 @@ async def send_enhanced_notification(symbol, side, amt, price, sl, tp, oid):
         f"🛑 **止损 (SL)**：`${sl:.2f}`\n"
         f"🎯 **止盈 (TP)**：`${tp:.2f}`\n"
         f"━━━━━━━━━━━━━━\n"
-        f"🆔 **成交单号**：`{oid}`"
+        f"🆔 **单号**：`{oid}`"
     )
     
-    async with aiohttp.ClientSession() as session:
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = {"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}
-        async with session.post(url, json=payload, proxy=proxy) as resp:
-            if resp.status == 200:
-                logger.info("✅ 战报推送成功")
-            else:
-                logger.warning(f"战报推送失败: {resp.status}")
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            payload = {"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}
+            async with session.post(url, json=payload, proxy=proxy) as resp:
+                if resp.status == 200:
+                    logger.info("✅ 战报推送成功")
+                else:
+                    logger.warning(f"战报推送失败: {resp.status}")
+    except Exception as e:
+        logger.error(f"通知发送异常: {e}")
 
 if __name__ == "__main__":
     if os.name == 'nt':

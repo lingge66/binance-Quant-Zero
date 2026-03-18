@@ -1,11 +1,4 @@
 """
-Copyright (c) 2026 lingge66. All rights reserved.
-This code is part of the Binance AI Agent project and is protected by copyright law.
-Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
-"""
-
-
-"""
 订单管理模块 - 订单创建、修改、取消与状态追踪 (Demo 模拟盘终极穿透版)
 
 核心功能：

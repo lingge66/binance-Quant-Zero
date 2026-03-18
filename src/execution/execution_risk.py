@@ -1,11 +1,4 @@
 """
-Copyright (c) 2026 lingge66. All rights reserved.
-This code is part of the Binance AI Agent project and is protected by copyright law.
-Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
-"""
-
-
-"""
 执行风险控制 - 订单执行层面的风险检查与控制
 
 核心功能：

@@ -1,11 +1,4 @@
 """
-Copyright (c) 2026 lingge66. All rights reserved.
-This code is part of the Binance AI Agent project and is protected by copyright law.
-Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
-"""
-
-
-"""
 交易执行层模块 - 负责订单管理、交易执行与仓位管理
 
 模块组成：

@@ -1,6 +1,14 @@
+# 忽略环境变量和密钥
 .env
+config/config.yaml
+
+# 忽略日志文件
+logs/
 *.log
-data/
+
+# 忽略 Python 缓存和虚拟环境
 __pycache__/
+*.pyc
 venv/
-.coverage
+quant_venv/
+.DS_Store
