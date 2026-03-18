@@ -89,6 +89,7 @@ cp .env.example .env
 申请 API Key 时，仅勾选“允许读取”和“允许合约交易”。  
 **绝对禁止勾选“允许提现”！** 本系统从不需要、也永远不会要求提现权限。  
 重要提醒：实盘API必须绑定IP,关闭提现功能。
+建议测试使用模拟API:https://demo.binance.com/en/my/settings/api-management
 
 #### 第四步：点火启动
 
