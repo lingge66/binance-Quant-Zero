@@ -3,7 +3,7 @@
 # --- 通信与网关 ---
 aiogram>=3.4.0          # Telegram 异步交互框架
 aiohttp>=3.8.0          # 异步 HTTP 客户端 (aiogram 核心依赖)
-aiohttp-socks>=2.0.0    # Telegram 代理连接支持 (必不可少)
+aiohttp-socks>=0.8.0    # Telegram 代理连接支持 (必不可少)
 websockets>=11.0        # 币安实时数据流推送支持
 
 # --- AI 大脑 ---
