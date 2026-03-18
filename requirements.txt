@@ -1,13 +1,22 @@
 # 领哥量化机甲 (Quant-Zero V1.0) 核心运行依赖
-aiogram>=3.4.0          # Telegram 异步交互网关
-ccxt>=4.2.0             # 币安底层交易所通信库
-pandas>=2.0.0           # SMC 盘面数据矩阵处理
-PyYAML>=6.0             # 雷达动态配置热更新
-python-dotenv>=1.0.0    # 环境变量与密钥安全管理
-requests>=2.31.0        # 基础网络请求
-openai>=1.0.0           # OpenAI 官方 Python 库（支持 AsyncOpenAI）
-aiohttp-socks>=2.0.0    # 支持 Telegram 代理连接（如 .env 中设置了 PROXY_URL）
-websockets>=11.0        # WebSocket 客户端（用于币安实时数据流）
-numpy>=1.24.0           # Pandas 依赖，确保科学计算性能
-pydantic>=2.0.0         # 配置数据模型验证（若项目中使用）
-aiohttp>=3.8.0          # 异步 HTTP 客户端（aiogram 依赖，明确版本以防冲突）
+
+# --- 通信与网关 ---
+aiogram>=3.4.0          # Telegram 异步交互框架
+aiohttp>=3.8.0          # 异步 HTTP 客户端 (aiogram 核心依赖)
+aiohttp-socks>=2.0.0    # Telegram 代理连接支持 (必不可少)
+websockets>=11.0        # 币安实时数据流推送支持
+
+# --- AI 大脑 ---
+openai>=1.0.0           # OpenAI/DeepSeek 兼容接口支持
+
+# --- 交易所底层 ---
+ccxt>=4.2.0             # 核心交易所通信库
+
+# --- 数据处理与指标 ---
+pandas>=2.0.0           # 策略信号矩阵处理
+numpy>=1.24.0           # 科学计算基础库
+
+# --- 系统工具 ---
+PyYAML>=6.0             # 配置文件热更新支持
+python-dotenv>=1.0.0    # 环境变量与密钥管理
+pydantic>=2.0.0         # 异步数据模型校验
