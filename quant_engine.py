@@ -106,45 +106,54 @@ async def get_quant_account_status() -> str:
     except Exception as e:
         return f"❌ 查账失败: {str(e)}"
 
-# ==========================================
-# 🚨 第二层：紧急熔断 (防延迟)
-# ==========================================
 async def emergency_close_all_positions() -> str:
+    """
+    极速并发版熔断引擎 (Ultra-Fast Concurrent Close)
+    """
     await arsenal.initialize()
     exchange = arsenal.monitor.exchange
     
     try:
         positions = await arsenal.monitor.fetch_positions()
-        results, errors = [], []
-        total_realized_pnl = 0.0
+        # 筛选出有实际仓位的币种
+        active_positions = [p for p in positions if float(p.position_amount) != 0]
 
-        for p in positions:
+        if not active_positions:
+            return "🟢 雷达扫描完毕，当前无持仓，无需平仓。"
+
+        # ==========================================
+        # 🚀 阶段 1：并发齐射撤销所有相关挂单 (释放保证金)
+        # ==========================================
+        cancel_tasks = []
+        for p in active_positions:
+            raw_symbol = p.symbol.split(':')[0].replace('/', '').upper()
+            # 仅调用币安原生接口，速度最快
+            cancel_tasks.append(exchange.fapiPrivateDeleteAllOpenOrders({'symbol': raw_symbol}))
+            
+        # 并发执行撤单，忽略个别没有挂单的报错
+        await asyncio.gather(*cancel_tasks, return_exceptions=True)
+        
+        # 全局仅需等待 0.3 秒，确保币安底层保证金已释放 (切勿在循环内 sleep)
+        await asyncio.sleep(0.3)
+
+        # ==========================================
+        # 💥 阶段 2：定义单币种极速平仓任务
+        # ==========================================
+        async def close_single_position(p):
             amt_float = float(p.position_amount)
-            if amt_float == 0:
-                continue
-
             raw_symbol = p.symbol.split(':')[0].replace('/', '').upper()
             amt = abs(amt_float)
             amt_str = f"{amt:.8f}".rstrip('0').rstrip('.') if '.' in f"{amt:.8f}" else f"{amt:.8f}"
             
             entry_price = float(getattr(p, 'entry_price', 0))
             pnl = float(getattr(p, 'unrealized_pnl', getattr(p, 'unrealizedProfit', 0)))
-            pnl_str = f"+{pnl:.2f}" if pnl > 0 else f"{pnl:.2f}"
-            pnl_icon = "🟩" if pnl > 0 else "🟥" if pnl < 0 else "⬜️"
             
             side_str = 'SELL' if amt_float > 0 else 'BUY'
             p_side_attr = str(getattr(p, 'position_side', getattr(p, 'positionSide', getattr(p, 'side', '')))).upper()
             target_pos_side = p_side_attr if p_side_attr in ['LONG', 'SHORT'] else ('LONG' if amt_float > 0 else 'SHORT')
-            dir_icon = "🟢多单" if (target_pos_side == 'LONG' or amt_float > 0) else "🔴空单"
 
-            success, last_error = False, ""
-
-            try: await exchange.cancel_all_orders(p.symbol)
-            except: pass
-            try: await exchange.fapiPrivateDeleteAllOpenOrders({'symbol': raw_symbol})
-            except: pass
-            
-            await asyncio.sleep(1.5)
+            success = False
+            last_error = ""
 
             for attempt in range(3):
                 try:
@@ -152,12 +161,12 @@ async def emergency_close_all_positions() -> str:
                     success = True
                     break
                 except Exception as e:
-                    try:
+                    try: # 降级尝试 reduceOnly
                         await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str, 'reduceOnly': 'true'})
                         success = True
                         break
                     except Exception as e2:
-                        try:
+                        try: # 降级尝试单向持仓模式
                             await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str})
                             success = True
                             break
@@ -165,29 +174,53 @@ async def emergency_close_all_positions() -> str:
                             last_error = str(e3)
                 
                 if not success:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(0.5) # 仅在重试时等待
 
-            if success:
-                total_realized_pnl += pnl
-                results.append(f"• {dir_icon} `{raw_symbol}` | 平仓数量: {amt_str}\n  └─ {pnl_icon} 结算盈亏: `{pnl_str} U` | 原开仓均价: ${entry_price:.2f}")
+            return {
+                "success": success, "symbol": raw_symbol, "amt_str": amt_str, 
+                "pnl": pnl, "entry_price": entry_price, "error": last_error, 
+                "amt_float": amt_float, "target_pos_side": target_pos_side
+            }
+
+        # ==========================================
+        # ⚡️ 阶段 3：全军出击！并发执行所有平仓任务
+        # ==========================================
+        close_tasks = [close_single_position(p) for p in active_positions]
+        results_data = await asyncio.gather(*close_tasks, return_exceptions=True)
+
+        # ==========================================
+        # 📊 阶段 4：清算战损与 UI 渲染
+        # ==========================================
+        results, errors = [], []
+        total_realized_pnl = 0.0
+
+        for res in results_data:
+            if isinstance(res, Exception):
+                errors.append(f"❌ 系统级异常: {str(res)}")
+                continue
+
+            pnl_str = f"+{res['pnl']:.2f}" if res['pnl'] > 0 else f"{res['pnl']:.2f}"
+            pnl_icon = "🟩" if res['pnl'] > 0 else "🟥" if res['pnl'] < 0 else "⬜️"
+            dir_icon = "🟢多单" if (res['target_pos_side'] == 'LONG' or res['amt_float'] > 0) else "🔴空单"
+
+            if res['success']:
+                total_realized_pnl += res['pnl']
+                results.append(f"• {dir_icon} `{res['symbol']}` | 平仓数量: {res['amt_str']}\n  └─ {pnl_icon} 结算盈亏: `{pnl_str} U` | 原开仓均价: ${res['entry_price']:.2f}")
             else:
-                errors.append(f"❌ `{raw_symbol}`: 历经3轮强制平仓仍被币安拒绝 - {last_error}")
+                errors.append(f"❌ `{res['symbol']}`: 历经3轮强制平仓仍被币安拒绝 - {res['error']}")
 
         balance = await arsenal.monitor.fetch_account_balance(force_refresh=True)
 
         msg_parts = []
         if results:
             total_pnl_icon = "💰" if total_realized_pnl >= 0 else "🩸"
-            header = "🚨 **紧急熔断指令执行完毕 (ALL POSITIONS CLOSED)**\n━━━━━━━━━━━━━━\n"
+            header = "🚨 **极速熔断指令执行完毕 (ALL POSITIONS CLOSED)**\n━━━━━━━━━━━━━━\n"
             body = "\n".join(results)
             footer = f"\n━━━━━━━━━━━━━━\n{total_pnl_icon} **本次平仓总盈亏 (估)**: `{total_realized_pnl:+.2f} USDT`\n🏦 **清算后净资产**: `{balance.total_balance:.2f} USD`"
             msg_parts.append(header + body + footer)
             
         if errors:
             msg_parts.append("\n⚠️ **【严重警报】以下仓位未能平掉，请立即登入交易所人工接管：**\n" + "\n".join(errors))
-            
-        if not results and not errors:
-            return "🟢 雷达扫描完毕，当前无持仓，无需平仓。"
 
         return "".join(msg_parts)
 
