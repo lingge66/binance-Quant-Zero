@@ -478,9 +478,19 @@ async def fast_balance(message: types.Message):
 @dp.message(or_f(Command("closeall"), F.text.in_({"快跑", "一键平仓", "清仓", "平仓"})))
 async def fast_emergency_close(message: types.Message):
     if HAS_QUANT:
+        # 🌟 核心补丁：熔断前，先强行熄火 PM2 自动化引擎，防止它瞬间重新建仓！
+        CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+        # 静默执行关闭命令
+        os.system(f"cd {CURRENT_DIR} && pm2 stop Quant-AutoTrader > /dev/null 2>&1")
+        
+        # 给用户一个安心的提示
+        await message.reply("⚡ 正在强行切断后台自动化引擎，并执行全量平仓...", parse_mode="Markdown")
+        
         ui_text = await emergency_close_all_positions()
-        try: await message.reply(ui_text, parse_mode="Markdown")
-        except: await message.reply(ui_text) 
+        try: 
+            await message.reply(ui_text, parse_mode="Markdown")
+        except: 
+            await message.reply(ui_text)
 
 @dp.message(or_f(Command("start_auto"), F.text.in_({"开启自动交易", "出海", "开启航母"})))
 async def start_auto_trading(message: types.Message):
@@ -495,6 +505,11 @@ async def start_auto_trading(message: types.Message):
 
         # 精准锁定路径并启动 PM2
         CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+        
+        # 🌟 核心修复：每次点火前，先无情斩杀可能存在的所有历史克隆进程！
+        os.system("pm2 delete Quant-AutoTrader > /dev/null 2>&1") 
+        
+        # 重新启动唯一的干净实例
         result = os.system(f"cd {CURRENT_DIR} && pm2 start main_auto_bot.py --name Quant-AutoTrader")
         
         if result == 0:
@@ -546,6 +561,73 @@ async def stop_auto_trading(message: types.Message):
             await thinking_msg.edit_text(f"❌ 熄火失败，PM2 返回码: {result}", parse_mode="Markdown")
     except Exception as e:
         await thinking_msg.edit_text(f"❌ 熄火失败: {e}")
+
+import sqlite3
+
+# ==========================================
+# 🧠 参谋部核心逻辑：黑匣子数据提取与 AI 诊断
+# ==========================================
+async def generate_ai_trade_analysis() -> str:
+    """读取 SQLite 黑匣子，并调用 LLM 生成专业的策略诊断研报"""
+    db_path = Path(__file__).parent / "data" / "trade_history.db"
+    has_real_data = False
+    trade_data_str = ""
+    
+    if db_path.exists():
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            # 提取最近的 30 笔交易记录用于分析
+            cursor.execute("SELECT timestamp, symbol, side, entry_price, quantity, sl_price, tp_price FROM trades ORDER BY timestamp DESC LIMIT 30")
+            rows = cursor.fetchall()
+            conn.close()
+            
+            if rows:
+                has_real_data = True
+                for r in rows:
+                    trade_data_str += f"时间:{r[0]}, 标的:{r[1]}, 方向:{r[2]}, 入场价:{r[3]:.4f}, 数量:{r[4]}, 止损价:{r[5]:.4f}, 止盈价:{r[6]:.4f}\n"
+        except Exception as e:
+            logging.error(f"读取数据库失败: {e}")
+            
+    if not has_real_data:
+        # 🧪 伪造一份逼真的演示数据喂给 AI
+        trade_data_str = """
+[演示数据1] 时间:昨日, 标的:BTCUSDT, 方向:SELL, 入场:71000, 止损:72000, 止盈:69000 (结果:触及止损,亏损)
+[演示数据2] 时间:昨日, 标的:ETHUSDT, 方向:BUY, 入场:2150, 止损:2100, 止盈:2225 (结果:触及止盈,盈利)
+[演示数据3] 时间:今日, 标的:BTCUSDT, 方向:BUY, 入场:68000, 止损:67000, 止盈:69500 (结果:触及止损,亏损)
+"""
+        prompt_context = f"以下是【虚拟演示数据】。请你在报告开头明确标注【🧪 演示模式诊断】，然后基于这些虚拟数据，评估系统采用的(EMA50顺势+RSI30/70+ATR止盈止损)策略，指出可能存在的问题，并给出具体的参数优化建议：\n{trade_data_str}"
+    else:
+        prompt_context = f"以下是领哥机甲真实的近期开仓记录。请作为顶尖量化策略师，分析这些开仓位置的合理性，评估(EMA50顺势+RSI30/70+ATR止盈止损)策略在当前行情下的表现，必须给出【具体的参数调整建议】（如：建议将RSI超买改至75，ATR止损调至2.5等）：\n{trade_data_str}"
+
+    messages = [
+        {"role": "system", "content": "你是一位拥有十年华尔街对冲基金经验的首席高频量化分析师。你的回答必须极度专业、一针见血。请使用清晰的 Markdown 格式输出研报。"},
+        {"role": "user", "content": prompt_context}
+    ]
+    
+    try:
+        response = await ai_client.chat.completions.create(model=AI_MODEL, messages=messages)
+        analysis_text = sanitize_ai_output(response.choices[0].message.content)
+        prefix = "🧪 **[系统演示] 历史战绩策略检诊报告**\n" if not has_real_data else "📈 **[实盘复盘] 策略运行深度诊断报告**\n"
+        return prefix + "\n" + analysis_text
+    except Exception as e:
+        return f"❌ AI 策略诊断生成失败: {e}"
+
+# ==========================================
+# 🥇 新增指令：独立的策略复盘与优化触发器
+# ==========================================
+@dp.message(or_f(Command("analyze"), F.text.in_({"分析交易", "分析交易记录", "策略优化", "复盘", "复盘分析"})))
+async def analyze_trades_handler(message: types.Message):
+    thinking_msg = await message.reply("🧠 *参谋部正在调取历史战绩黑匣子，生成策略诊断报告...*", parse_mode="Markdown")
+    try:
+        ai_analysis_report = await generate_ai_trade_analysis()
+        try:
+            await thinking_msg.edit_text(ai_analysis_report, parse_mode="Markdown")
+        except:
+            await thinking_msg.edit_text(ai_analysis_report)
+    except Exception as e:
+        friendly_err = humanize_error(e, context="生成诊断报告")
+        await thinking_msg.edit_text(friendly_err)
 # ==========================================
 @dp.message()
 async def smart_ai_chat(message: types.Message):
