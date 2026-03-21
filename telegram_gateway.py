@@ -11,6 +11,7 @@ import asyncio
 import logging
 import json
 import aiohttp
+import socket
 import re
 import yaml
 from pathlib import Path
@@ -19,7 +20,20 @@ from aiogram.filters import Command, CommandStart, or_f
 from aiogram.client.session.aiohttp import AiohttpSession
 from openai import AsyncOpenAI 
 from dotenv import load_dotenv
+# 保持对 socket 的引用，防止被 Python 垃圾回收机制回收
+_instance_lock_socket = None
 
+def enforce_single_instance():
+    """全平台通用的单例锁：利用底层 Socket 排他性防止双开"""
+    global _instance_lock_socket
+    _instance_lock_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # 绑定一个专属冷门端口（例如 6666，领哥专属）
+        _instance_lock_socket.bind(('127.0.0.1', 6666))
+        logging.info("✅ 跨平台单例锁已激活，当前为全网唯一运行实例。")
+    except socket.error:
+        logging.error("🧟 拦截到重复启动！已有领哥机甲在运行，为防止 409 冲突，当前进程自动退出。")
+        sys.exit(0) # 安全退出，不抛出刺眼的红字报错
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - ⚡ 领哥独立网关 - %(message)s')
 
 # ==========================================
@@ -144,7 +158,25 @@ async def execute_ai_trade(symbol: str, side: str, amount: float = None, usdt_am
             try:
                 ticker = await exchange.fapiPublicGetTickerPrice({'symbol': raw_symbol})
                 current_price = float(ticker['price'])
-                amount = round(usdt_amount / current_price, 3) 
+                
+                # 获取币安该交易对的真实精度限制 (LOT_SIZE)
+                exchange_info = await exchange.fapiPublicGetExchangeInfo()
+                symbol_info = next((s for s in exchange_info['symbols'] if s['symbol'] == raw_symbol), None)
+                
+                if symbol_info:
+                    # 提取数量精度的 stepSize (比如 "0.010" 或 "1.000")
+                    lot_filter = next((f for f in symbol_info['filters'] if f['filterType'] == 'LOT_SIZE'), None)
+                    if lot_filter:
+                        step_size = float(lot_filter['stepSize'])
+                        # 精准向下取整，完美契合币安精度 (例如 step_size 是 0.01，算出来是 0.938，会截断成 0.93)
+                        raw_amount = usdt_amount / current_price
+                        amount = round(raw_amount - (raw_amount % step_size), 6) # 防止浮点数误差
+                        # 去除末尾多余的 .0
+                        amount = int(amount) if amount.is_integer() else amount
+                else:
+                    # 极端兜底：如果没查到，默认保留 1 位小数，最安全
+                    amount = round(usdt_amount / current_price, 1)
+
             except Exception as e:
                 return json.dumps({"status": "ERROR", "msg": f"❌ 转换U本位金额失败: {str(e)}"})
         
@@ -307,7 +339,52 @@ def sanitize_ai_output(text: str) -> str:
     if re.search(r'(<｜DSML｜|invoke name|functioncalls)', text, re.IGNORECASE):
         return "⚠️ **拦截器触发**：引擎遭遇底层格式泄露。请您重新发送指令！"
     return text
+def humanize_error(error_obj: Exception, context: str = "") -> str:
+    """
+    人性化异常翻译官：将晦涩的机器报错翻译成小白能懂的文案
+    """
+    error_str = str(error_obj).lower()
+    prefix = f"❌ {context}失败：" if context else "❌ 执行中止："
 
+    # ==========================================
+    # 🧠 1. 大语言模型 (AI / DeepSeek / OpenAI) 错误
+    # ==========================================
+    if "401" in error_str and ("api key" in error_str or "authentication" in error_str):
+        return prefix + "AI 大脑神经断开。原因：LLM_API_KEY 无效、填写错误或已过期，请检查 .env 文件。"
+    elif "429" in error_str or "insufficient_quota" in error_str or "balance" in error_str:
+        return prefix + "AI 大脑算力耗尽。原因：API 额度已用完或请求过于频繁，请充值或稍后再试。"
+    elif "timeout" in error_str:
+        return prefix + "AI 思考超时。原因：网络拥堵或大模型服务器响应太慢，请重新发送指令。"
+
+    # ==========================================
+    # 🏦 2. 币安 API 与资金报错
+    # ==========================================
+    elif "invalid api-key" in error_str or "api-key format invalid" in error_str:
+        return prefix + "交易所未授权。原因：币安 API Key 填写错误，请检查 .env 配置。"
+    elif "signature for this request is not valid" in error_str:
+        return prefix + "签名校验失败。原因：币安 API Secret 填写错误，请检查 .env 配置。"
+    elif "ip restricted" in error_str or "ip address" in error_str:
+        return prefix + "IP 被拦截。原因：你当前的服务器 IP 未在币安 API 的白名单中，或你未绑定 IP。"
+    elif "margin is insufficient" in error_str or "insufficient balance" in error_str:
+        return prefix + "钱包余额不足。原因：可用保证金不够开仓，请降低开仓数量或充值。"
+    elif "leverage" in error_str and "reduce" in error_str:
+        return prefix + "杠杆/风控限制。原因：当前开仓金额过大，触发了币安的最高杠杆规则限制。"
+    elif "position side does not match" in error_str:
+        return prefix + "仓位模式冲突。原因：系统请求了双向持仓模式，但你的币安账户目前是单向持仓，请去 App 里修改设置。"
+    
+    # ==========================================
+    # 🔌 3. 网络与系统级错误
+    # ==========================================
+    elif "connection refused" in error_str:
+        return prefix + "网络连接被拒绝。原因：服务器无法访问外部网络，请检查代理或防火墙。"
+    
+    # ==========================================
+    # 🤷‍♂️ 4. 未知兜底
+    # ==========================================
+    else:
+        # 如果匹配不到，就原样输出，但加上截断防止太长刷屏
+        short_err = str(error_obj)[:150] + ("..." if len(str(error_obj)) > 150 else "")
+        return prefix + f"遭遇未知底层异常 - `{short_err}`"
 # ==========================================
 # 🥇 各种机器人指令拦截器
 # ==========================================
@@ -572,7 +649,8 @@ async def smart_ai_chat(message: types.Message):
             except: await thinking_msg.edit_text(final_content)
 
     except Exception as e:
-        await thinking_msg.edit_text(f"❌ 参谋部神经断开: {e}")
+        friendly_msg = humanize_error(e, context="参谋部推演")
+        await thinking_msg.edit_text(friendly_msg)
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
@@ -580,4 +658,11 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # 1. 启动前先上锁，全平台适用！
+    enforce_single_instance()
+    
+    # 2. 正常点火
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.info("🛑 收到本地退出指令，机甲已安全下线。")
