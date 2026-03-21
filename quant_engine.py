@@ -137,7 +137,7 @@ async def emergency_close_all_positions() -> str:
         await asyncio.sleep(0.3)
 
         # ==========================================
-        # 💥 阶段 2：定义单币种极速平仓任务
+        # 💥 阶段 2：定义单币种极速平仓任务 (完美修复方向判定)
         # ==========================================
         async def close_single_position(p):
             amt_float = float(p.position_amount)
@@ -148,38 +148,49 @@ async def emergency_close_all_positions() -> str:
             entry_price = float(getattr(p, 'entry_price', 0))
             pnl = float(getattr(p, 'unrealized_pnl', getattr(p, 'unrealizedProfit', 0)))
             
-            side_str = 'SELL' if amt_float > 0 else 'BUY'
+            # 🌟 终极修复：准确提取真实持仓方向，绝不依赖数量正负号！
             p_side_attr = str(getattr(p, 'position_side', getattr(p, 'positionSide', getattr(p, 'side', '')))).upper()
-            target_pos_side = p_side_attr if p_side_attr in ['LONG', 'SHORT'] else ('LONG' if amt_float > 0 else 'SHORT')
+            
+            if p_side_attr in ['SHORT', 'SELL']:
+                is_long = False
+            elif p_side_attr in ['LONG', 'BUY']:
+                is_long = True
+            else:
+                is_long = (amt_float > 0)
+                
+            # 决定开平仓动作：多单用 SELL 平，空单用 BUY 平
+            close_side_str = 'SELL' if is_long else 'BUY'
+            # 决定持仓方向参数：保留原有的方向标记
+            target_pos_side = p_side_attr if p_side_attr in ['LONG', 'SHORT'] else ('LONG' if is_long else 'SHORT')
 
             success = False
             last_error = ""
 
             for attempt in range(3):
                 try:
-                    await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str, 'positionSide': target_pos_side})
+                    await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': close_side_str, 'type': 'MARKET', 'quantity': amt_str, 'positionSide': target_pos_side})
                     success = True
                     break
                 except Exception as e:
                     try: # 降级尝试 reduceOnly
-                        await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str, 'reduceOnly': 'true'})
+                        await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': close_side_str, 'type': 'MARKET', 'quantity': amt_str, 'reduceOnly': 'true'})
                         success = True
                         break
                     except Exception as e2:
                         try: # 降级尝试单向持仓模式
-                            await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': side_str, 'type': 'MARKET', 'quantity': amt_str})
+                            await exchange.fapiPrivatePostOrder({'symbol': raw_symbol, 'side': close_side_str, 'type': 'MARKET', 'quantity': amt_str})
                             success = True
                             break
                         except Exception as e3:
                             last_error = str(e3)
                 
                 if not success:
-                    await asyncio.sleep(0.5) # 仅在重试时等待
+                    await asyncio.sleep(0.5)
 
             return {
                 "success": success, "symbol": raw_symbol, "amt_str": amt_str, 
                 "pnl": pnl, "entry_price": entry_price, "error": last_error, 
-                "amt_float": amt_float, "target_pos_side": target_pos_side
+                "is_long": is_long # 传递真实方向给 UI 渲染
             }
 
         # ==========================================
@@ -201,7 +212,8 @@ async def emergency_close_all_positions() -> str:
 
             pnl_str = f"+{res['pnl']:.2f}" if res['pnl'] > 0 else f"{res['pnl']:.2f}"
             pnl_icon = "🟩" if res['pnl'] > 0 else "🟥" if res['pnl'] < 0 else "⬜️"
-            dir_icon = "🟢多单" if (res['target_pos_side'] == 'LONG' or res['amt_float'] > 0) else "🔴空单"
+            # 🌟 使用真实方向渲染 UI，告别颠倒黑白
+            dir_icon = "🟢多单" if res['is_long'] else "🔴空单"
 
             if res['success']:
                 total_realized_pnl += res['pnl']
