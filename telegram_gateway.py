@@ -20,6 +20,9 @@ from aiogram.filters import Command, CommandStart, or_f
 from aiogram.client.session.aiohttp import AiohttpSession
 from openai import AsyncOpenAI 
 from dotenv import load_dotenv
+import time
+# 记录用户最后一次交互的时间戳
+_user_command_locks = {}
 # 保持对 socket 的引用，防止被 Python 垃圾回收机制回收
 _instance_lock_socket = None
 
@@ -632,6 +635,12 @@ async def analyze_trades_handler(message: types.Message):
 @dp.message()
 async def smart_ai_chat(message: types.Message):
     if not message.text: return
+    # 🌟 极简防抖拦截：3秒内禁止重复发指令
+    user_id = message.from_user.id
+    now = time.time()
+    if user_id in _user_command_locks and now - _user_command_locks[user_id] < 3.0:
+        return await message.reply("⏳ 参谋部正在处理上一条指令，请勿频繁点击...")
+    _user_command_locks[user_id] = now
     thinking_msg = await message.reply("🧠 *参谋部推演中...*", parse_mode="Markdown")
     messages = [{"role": "system", "content": SOUL_PROMPT}, {"role": "user", "content": message.text}]
     
