@@ -4,8 +4,8 @@ Copyright (c) 2026 lingge66. All rights reserved.
 This code is part of the Binance AI Agent project.
 Open Source Version - Adaptable for all environments.
 
-OpenClaw Binance Agent - 自动化 3.0 (风控完全体 + 战绩黑匣子)
-集成规则引擎 + 动态原生止盈止损 + SQLite 交易记录存档
+OpenClaw Binance Agent - 自动化 3.0 (满配进化版)
+多线程并发 + 断网静默保护 + 战绩黑匣子 + 原生双向风控
 """
 
 import os
@@ -124,7 +124,7 @@ def calculate_indicators(df: pd.DataFrame):
     return df
 
 # ==========================================
-# 🚀 自动化主引擎循环
+# 🚀 主循环
 # ==========================================
 async def run_auto_bot_v3():
     print("\n" + "🚀".center(60, "-"))
@@ -157,156 +157,167 @@ async def run_auto_bot_v3():
 
     try:
         iteration = 1
+        error_streak = 0  # 🌟 连续报错计数器 (断网静默保护)
+        
         while True:
             logger.info(f"第 {iteration} 轮深度扫描开始...")
             
-            for symbol in symbols:
-                try:
-                    # 1. 获取K线与指标计算
-                    raw_params = {'symbol': symbol.replace('/', ''), 'interval': '1m', 'limit': 50}
-                    klines = await monitor._safe_api_call(monitor.exchange.fapiPublicGetKlines, raw_params)
-                    df = pd.DataFrame([[k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])] for k in klines],
-                                      columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-                    df = calculate_indicators(df)
-                    
-                    current_price = df['close'].iloc[-1]
-                    current_rsi = df['rsi'].iloc[-1]
-                    current_atr = df['atr'].iloc[-1]
-                    
-                    # 2. 趋势方向探测
-                    trend_allowed = True
-                    trend_direction = "unknown"
-                    if use_trend_filter:
-                        trend_params = {'symbol': symbol.replace('/', ''), 'interval': trend_timeframe, 'limit': 100}
-                        trend_klines = await monitor._safe_api_call(monitor.exchange.fapiPublicGetKlines, trend_params)
-                        df_trend = pd.DataFrame([[k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])] for k in trend_klines],
-                                                columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-                        df_trend['ema'] = df_trend['close'].ewm(span=trend_ema_period, adjust=False).mean()
-                        latest_ema = df_trend['ema'].iloc[-1]
-                        
-                        trend_direction = "up" if current_price > latest_ema else "down"
-                        logger.info(f"📊 {symbol} 趋势方向: {trend_direction} (EMA{trend_ema_period}: {latest_ema:.2f})")
-
-                    # 3. RSI 动能信号生成
-                    signal_side = None  
-                    if current_rsi < rsi_oversold: signal_side = OrderSide.BUY
-                    elif current_rsi > rsi_overbought: signal_side = OrderSide.SELL
-                        
-                    # [测试后门] 演示模式：首轮强制开仓
-                    if signal_side is None and iteration == 1:
-                        signal_side = OrderSide.SELL
-                        logger.warning("⚠️ [演示模式] 触发首轮模拟强制做空信号")
-                        
-                    # 4. 顺势过滤拦截
-                    if use_trend_filter and signal_side is not None:
-                        if signal_side == OrderSide.BUY and trend_direction == "down":
-                            trend_allowed = False
-                            logger.info(f"⏭️ {symbol} 逆势做多(趋势向下)被拦截，跳过")
-                        elif signal_side == OrderSide.SELL and trend_direction == "up":
-                            trend_allowed = False
-                            logger.info(f"⏭️ {symbol} 逆势做空(趋势向上)被拦截，跳过")
-
-                    if signal_side is None or not trend_allowed:
-                        continue
-
-                    # 5. 检查已有持仓
-                    positions = await monitor.fetch_positions()
-                    existing = [p for p in positions if p.symbol == symbol and p.position_amount != 0]
-                    if len(existing) >= max_positions_per_symbol:
-                        logger.info(f"⏭️ {symbol} 已有 {len(existing)} 个持仓（上限{max_positions_per_symbol}），跳过开仓")
-                        continue
-                    
-                    # 6. 风控上下文构建与校验
-                    balance = await monitor.fetch_account_balance(force_refresh=True)
-                    trade_ctx = TradeContext(
-                        symbol=symbol,
-                        position_side="long" if signal_side == OrderSide.BUY else "short",
-                        entry_price=current_price, current_price=current_price,
-                        position_size=base_amount, unrealized_pnl=0.0, realized_pnl=0.0,
-                        leverage=1.0, timestamp=int(time.time() * 1000)
-                    )
-                    
-                    open_trades = []
-                    for p in positions:
-                        if p.position_amount != 0:
-                            open_trades.append(TradeContext(
-                                symbol=p.symbol, position_side=p.position_side,
-                                entry_price=p.entry_price, current_price=p.mark_price,
-                                position_size=p.position_amount, unrealized_pnl=p.unrealized_pnl,
-                                realized_pnl=0.0, leverage=p.leverage, timestamp=int(time.time() * 1000)
-                            ))
-                    
-                    account_ctx = AccountContext(
-                        total_balance=balance.total_balance, available_balance=balance.available_balance,
-                        margin_ratio=balance.margin_ratio,
-                        total_position_value=sum(p.position_amount * p.mark_price for p in positions if p.position_amount != 0),
-                        daily_pnl=0.0, weekly_pnl=0.0, open_positions=open_trades, timestamp=balance.timestamp
-                    )
-                    
-                    rule_results = await rule_engine.evaluate_all_rules(trade_ctx, account_ctx, record_trade_attempt=True)
-                    if rule_engine.has_critical_failure(rule_results) or any(not r.passed for r in rule_results):
-                        logger.warning(f"🛑 {symbol} 风控未通过，跳过开仓")
-                        for r in rule_results:
-                            if not r.passed: logger.warning(f"  规则 {r.rule_name}: {r.message}")
-                        continue
-                    
-                    # 7. 动态计算止损止盈
-                    sl_distance = current_atr * atr_multiplier_sl
-                    tp_distance = current_atr * atr_multiplier_tp
-                    if signal_side == OrderSide.BUY:
-                        sl_price = current_price - sl_distance
-                        tp_price = current_price + tp_distance
-                    else:
-                        sl_price = current_price + sl_distance
-                        tp_price = current_price - tp_distance
-                    
-                    # 8. 执行开仓与原生风控挂载
-                    logger.info(f"🛡️ 风控校验通过，准备开仓 {symbol} {signal_side.value} 数量 {base_amount}")
+            try:
+                for symbol in symbols:
                     try:
-                        order = await manager.create_order(symbol, OrderType.MARKET, signal_side, base_amount)
-                        executed = await manager.submit_order(order.order_id, dry_run=False)
-                        order_id = executed.metadata.get('exchange_order_id', 'N/A')
+                        # 1. 获取K线与指标计算
+                        raw_params = {'symbol': symbol.replace('/', ''), 'interval': '1m', 'limit': 50}
+                        klines = await monitor._safe_api_call(monitor.exchange.fapiPublicGetKlines, raw_params)
+                        df = pd.DataFrame([[k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])] for k in klines],
+                                          columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
                         
-                        # ==========================================
-                        # 🌟 终极修复：原生裸接口双向挂载止盈止损
-                        # ==========================================
-                        raw_symbol = symbol.replace('/', '').upper()
-                        pos_side_str = 'LONG' if signal_side == OrderSide.BUY else 'SHORT'
-                        close_side_str = 'SELL' if signal_side == OrderSide.BUY else 'BUY'
-
-                        # 挂载止损
-                        try:
-                            sl_params = {'symbol': raw_symbol, 'side': close_side_str, 'type': 'STOP_MARKET', 'algoType': 'CONDITIONAL', 'triggerPrice': f"{sl_price:g}", 'closePosition': 'true', 'workingType': 'MARK_PRICE', 'positionSide': pos_side_str}
-                            try: await monitor.exchange.request('fapi/v1/algoOrder', 'private', 'POST', sl_params)
-                            except:
-                                del sl_params['positionSide']
-                                await monitor.exchange.request('fapi/v1/algoOrder', 'private', 'POST', sl_params)
-                            logger.info(f"  🛡️ 原生止损单挂载成功: {sl_price:.2f}")
-                        except Exception as e: logger.error(f"  ❌ 止损单挂载失败: {e}")
-
-                        # 挂载止盈
-                        try:
-                            tp_params = {'symbol': raw_symbol, 'side': close_side_str, 'type': 'TAKE_PROFIT_MARKET', 'algoType': 'CONDITIONAL', 'triggerPrice': f"{tp_price:g}", 'closePosition': 'true', 'workingType': 'MARK_PRICE', 'positionSide': pos_side_str}
-                            try: await monitor.exchange.request('fapi/v1/algoOrder', 'private', 'POST', tp_params)
-                            except:
-                                del tp_params['positionSide']
-                                await monitor.exchange.request('fapi/v1/algoOrder', 'private', 'POST', tp_params)
-                            logger.info(f"  🎯 原生止盈单挂载成功: {tp_price:.2f}")
-                        except Exception as e: logger.error(f"  ❌ 止盈单挂载失败: {e}")
+                        # 🌟 核心提速：将消耗 CPU 的 Pandas 数据帧计算放入多线程后台执行
+                        df = await asyncio.to_thread(calculate_indicators, df)
                         
-                        # 🌟 新增：成功开仓后，写入本地黑匣子！
-                        log_trade(symbol, signal_side.value.upper(), current_price, base_amount, sl_price, tp_price, order_id)
+                        current_price = df['close'].iloc[-1]
+                        current_rsi = df['rsi'].iloc[-1]
+                        current_atr = df['atr'].iloc[-1]
+                        
+                        # 2. 趋势方向探测
+                        trend_allowed = True
+                        trend_direction = "unknown"
+                        if use_trend_filter:
+                            trend_params = {'symbol': symbol.replace('/', ''), 'interval': trend_timeframe, 'limit': 100}
+                            trend_klines = await monitor._safe_api_call(monitor.exchange.fapiPublicGetKlines, trend_params)
+                            df_trend = pd.DataFrame([[k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])] for k in trend_klines],
+                                                    columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+                            df_trend['ema'] = df_trend['close'].ewm(span=trend_ema_period, adjust=False).mean()
+                            latest_ema = df_trend['ema'].iloc[-1]
+                            
+                            trend_direction = "up" if current_price > latest_ema else "down"
+                            logger.info(f"📊 {symbol} 趋势方向: {trend_direction} (EMA{trend_ema_period}: {latest_ema:.2f})")
 
-                        # 发送战报
-                        await send_enhanced_notification(symbol, signal_side.value.upper(), base_amount, current_price, sl_price, tp_price, order_id)
+                        # 3. RSI 动能信号生成
+                        signal_side = None  
+                        if current_rsi < rsi_oversold: signal_side = OrderSide.BUY
+                        elif current_rsi > rsi_overbought: signal_side = OrderSide.SELL
+                            
+                        # 4. 顺势过滤拦截
+                        if use_trend_filter and signal_side is not None:
+                            if signal_side == OrderSide.BUY and trend_direction == "down":
+                                trend_allowed = False
+                                logger.info(f"⏭️ {symbol} 逆势做多(趋势向下)被拦截，跳过")
+                            elif signal_side == OrderSide.SELL and trend_direction == "up":
+                                trend_allowed = False
+                                logger.info(f"⏭️ {symbol} 逆势做空(趋势向上)被拦截，跳过")
+
+                        if signal_side is None or not trend_allowed:
+                            continue
+
+                        # 5. 检查已有持仓
+                        positions = await monitor.fetch_positions()
+                        existing = [p for p in positions if p.symbol == symbol and p.position_amount != 0]
+                        if len(existing) >= max_positions_per_symbol:
+                            logger.info(f"⏭️ {symbol} 已有 {len(existing)} 个持仓（上限{max_positions_per_symbol}），跳过开仓")
+                            continue
+                        
+                        # 6. 风控上下文构建与校验
+                        balance = await monitor.fetch_account_balance(force_refresh=True)
+                        trade_ctx = TradeContext(
+                            symbol=symbol,
+                            position_side="long" if signal_side == OrderSide.BUY else "short",
+                            entry_price=current_price, current_price=current_price,
+                            position_size=base_amount, unrealized_pnl=0.0, realized_pnl=0.0,
+                            leverage=1.0, timestamp=int(time.time() * 1000)
+                        )
+                        
+                        open_trades = []
+                        for p in positions:
+                            if p.position_amount != 0:
+                                open_trades.append(TradeContext(
+                                    symbol=p.symbol, position_side=p.position_side,
+                                    entry_price=p.entry_price, current_price=p.mark_price,
+                                    position_size=p.position_amount, unrealized_pnl=p.unrealized_pnl,
+                                    realized_pnl=0.0, leverage=p.leverage, timestamp=int(time.time() * 1000)
+                                ))
+                        
+                        account_ctx = AccountContext(
+                            total_balance=balance.total_balance, available_balance=balance.available_balance,
+                            margin_ratio=balance.margin_ratio,
+                            total_position_value=sum(p.position_amount * p.mark_price for p in positions if p.position_amount != 0),
+                            daily_pnl=0.0, weekly_pnl=0.0, open_positions=open_trades, timestamp=balance.timestamp
+                        )
+                        
+                        rule_results = await rule_engine.evaluate_all_rules(trade_ctx, account_ctx, record_trade_attempt=True)
+                        if rule_engine.has_critical_failure(rule_results) or any(not r.passed for r in rule_results):
+                            logger.warning(f"🛑 {symbol} 风控未通过，跳过开仓")
+                            for r in rule_results:
+                                if not r.passed: logger.warning(f"  规则 {r.rule_name}: {r.message}")
+                            continue
+                        
+                        # 7. 动态计算止损止盈
+                        sl_distance = current_atr * atr_multiplier_sl
+                        tp_distance = current_atr * atr_multiplier_tp
+                        if signal_side == OrderSide.BUY:
+                            sl_price = current_price - sl_distance
+                            tp_price = current_price + tp_distance
+                        else:
+                            sl_price = current_price + sl_distance
+                            tp_price = current_price - tp_distance
+                        
+                        # 8. 执行开仓与原生风控挂载
+                        logger.info(f"🛡️ 风控校验通过，准备开仓 {symbol} {signal_side.value} 数量 {base_amount}")
+                        try:
+                            order = await manager.create_order(symbol, OrderType.MARKET, signal_side, base_amount)
+                            executed = await manager.submit_order(order.order_id, dry_run=False)
+                            order_id = executed.metadata.get('exchange_order_id', 'N/A')
+                            
+                            # ==========================================
+                            # 🌟 终极修复：原生裸接口双向挂载止盈止损
+                            # ==========================================
+                            raw_symbol = symbol.replace('/', '').upper()
+                            pos_side_str = 'LONG' if signal_side == OrderSide.BUY else 'SHORT'
+                            close_side_str = 'SELL' if signal_side == OrderSide.BUY else 'BUY'
+
+                            # 挂载止损
+                            try:
+                                sl_params = {'symbol': raw_symbol, 'side': close_side_str, 'type': 'STOP_MARKET', 'algoType': 'CONDITIONAL', 'triggerPrice': f"{sl_price:g}", 'closePosition': 'true', 'workingType': 'MARK_PRICE', 'positionSide': pos_side_str}
+                                try: await monitor.exchange.request('fapi/v1/algoOrder', 'private', 'POST', sl_params)
+                                except:
+                                    del sl_params['positionSide']
+                                    await monitor.exchange.request('fapi/v1/algoOrder', 'private', 'POST', sl_params)
+                                logger.info(f"  🛡️ 原生止损单挂载成功: {sl_price:.2f}")
+                            except Exception as e: logger.error(f"  ❌ 止损单挂载失败: {e}")
+
+                            # 挂载止盈
+                            try:
+                                tp_params = {'symbol': raw_symbol, 'side': close_side_str, 'type': 'TAKE_PROFIT_MARKET', 'algoType': 'CONDITIONAL', 'triggerPrice': f"{tp_price:g}", 'closePosition': 'true', 'workingType': 'MARK_PRICE', 'positionSide': pos_side_str}
+                                try: await monitor.exchange.request('fapi/v1/algoOrder', 'private', 'POST', tp_params)
+                                except:
+                                    del tp_params['positionSide']
+                                    await monitor.exchange.request('fapi/v1/algoOrder', 'private', 'POST', tp_params)
+                                logger.info(f"  🎯 原生止盈单挂载成功: {tp_price:.2f}")
+                            except Exception as e: logger.error(f"  ❌ 止盈单挂载失败: {e}")
+                            
+                            # 🌟 新增：成功开仓后，写入本地黑匣子！
+                            log_trade(symbol, signal_side.value.upper(), current_price, base_amount, sl_price, tp_price, order_id)
+
+                            # 发送战报
+                            await send_enhanced_notification(symbol, signal_side.value.upper(), base_amount, current_price, sl_price, tp_price, order_id)
+                            
+                        except Exception as e:
+                            logger.error(f"开仓失败 {symbol}: {e}")
                         
                     except Exception as e:
-                        logger.error(f"开仓失败 {symbol}: {e}")
-                    
-                except Exception as e:
-                    logger.error(f"处理 {symbol} 时出错: {e}")
-                    continue
-            
+                        logger.error(f"处理 {symbol} 时出错: {e}")
+                        continue
+                
+                # 本轮全部成功，重置报错计数器
+                error_streak = 0
+                
+            except Exception as e:
+                # 🌟 断网静默保护：遇到大范围报错，进行指数退避休眠
+                error_streak += 1
+                sleep_time = min(error_streak * 10, 300)
+                logger.error(f"⚠️ 遭遇全局异常或断网 ({e})，进入静默保护模式。休眠 {sleep_time} 秒后重试...")
+                await asyncio.sleep(sleep_time)
+                continue
+                
             iteration += 1
             await asyncio.sleep(interval_seconds)
             
@@ -325,7 +336,7 @@ async def send_enhanced_notification(symbol, side, amt, price, sl, tp, oid):
     if not bot_token or not chat_id: return
 
     msg = (
-        f"🛡️ **量化大脑 3.0 演示自动开仓**\n"
+        f"🛡️ **量化大脑 3.0 自动开仓战报**\n"
         f"━━━━━━━━━━━━━━\n"
         f"📊 **标的**：`{symbol}`\n"
         f"⚖️ **方向**：`{'多单 (LONG)' if side == 'BUY' else '空单 (SHORT)'}`\n"
