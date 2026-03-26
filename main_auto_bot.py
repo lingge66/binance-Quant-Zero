@@ -4,8 +4,8 @@ Copyright (c) 2026 lingge66. All rights reserved.
 This code is part of the Binance AI Agent project.
 Open Source Version - Adaptable for all environments.
 
-OpenClaw Binance Agent - 自动化 3.0 (满配进化版)
-多线程并发 + 断网静默保护 + 战绩黑匣子 + 原生双向风控
+OpenClaw Binance Agent - 自动化 3.0 (满配实战进化版)
+多线程限流并发 + 断网静默保护 + 战绩黑匣子(WAL模式) + 原生双向风控
 """
 
 import os
@@ -17,6 +17,7 @@ import sqlite3
 import aiohttp
 import pandas as pd
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 # ==========================================
 # 🛠️ 动态路径破解：适应任何用户的环境
@@ -60,10 +61,12 @@ data_dir.mkdir(exist_ok=True)
 DB_PATH = data_dir / "trade_history.db"
 
 def init_db():
-    """初始化量化交易黑匣子数据库"""
+    """初始化量化交易黑匣子数据库，开启 WAL 模式增强并发"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
+        # 🌟 开启 WAL 模式，彻底解决多进程读写 database is locked 报错
+        cursor.execute('PRAGMA journal_mode=WAL;')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS trades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,17 +80,20 @@ def init_db():
                 order_id TEXT
             )
         ''')
+        # 创建索引提升 AI 复盘检索速度
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_timestamp ON trades(timestamp)')
         conn.commit()
         conn.close()
-        logger.info(f"🗄️ 战绩黑匣子系统在线: {DB_PATH}")
+        logger.info(f"🗄️ 战绩黑匣子系统在线 (WAL 高并发模式): {DB_PATH}")
     except Exception as e:
         logger.error(f"❌ 数据库初始化失败: {e}")
 
-def log_trade(symbol: str, side: str, entry_price: float, quantity: float, sl_price: float, tp_price: float, order_id: str):
-    """将开仓记录不可篡改地写入黑匣子"""
+def _sync_log_trade(symbol: str, side: str, entry_price: float, quantity: float, sl_price: float, tp_price: float, order_id: str):
+    """(同步函数) 将开仓记录不可篡改地写入黑匣子，增加 timeout 防止锁死"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
         cursor = conn.cursor()
+        cursor.execute('PRAGMA journal_mode=WAL;')
         cursor.execute('''
             INSERT INTO trades (symbol, side, entry_price, quantity, sl_price, tp_price, order_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -99,10 +105,11 @@ def log_trade(symbol: str, side: str, entry_price: float, quantity: float, sl_pr
         logger.error(f"❌ 战绩写入黑匣子失败: {e}")
 
 # ==========================================
-# 🧠 指标计算
+# 🧠 指标计算 (完全多线程化，防阻塞)
 # ==========================================
-def calculate_indicators(df: pd.DataFrame):
-    """计算 RSI、ATR 和 EMA"""
+def calculate_indicators(klines_data):
+    """计算 RSI 和 ATR"""
+    df = pd.DataFrame(klines_data, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
     # RSI
     close_delta = df['close'].diff()
     up = close_delta.clip(lower=0)
@@ -118,15 +125,22 @@ def calculate_indicators(df: pd.DataFrame):
         (df['low'] - df['close'].shift(1)).abs()
     ], axis=1).max(axis=1)
     df['atr'] = df['tr'].rolling(window=14).mean()
-    
-    # EMA 用于趋势过滤
-    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-    return df
+    return df['close'].iloc[-1], df['rsi'].iloc[-1], df['atr'].iloc[-1]
+
+def calculate_trend_ema(trend_klines, period):
+    """独立的趋势 EMA 计算"""
+    df_trend = pd.DataFrame(trend_klines, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+    df_trend['ema'] = df_trend['close'].ewm(span=period, adjust=False).mean()
+    return df_trend['ema'].iloc[-1]
 
 # ==========================================
 # 🚀 主循环
 # ==========================================
 async def run_auto_bot_v3():
+    # 🌟 机构级性能调优：锁定后台线程池最大工作数，防止 CPU 拥塞崩溃
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=10))
+
     print("\n" + "🚀".center(60, "-"))
     print("量化大脑 3.0 - 风控完全体启动".center(50))
     print("-".center(60, "-") + "\n")
@@ -165,18 +179,12 @@ async def run_auto_bot_v3():
             try:
                 for symbol in symbols:
                     try:
-                        # 1. 获取K线与指标计算
+                        # 1. 获取K线数据
                         raw_params = {'symbol': symbol.replace('/', ''), 'interval': '1m', 'limit': 50}
                         klines = await monitor._safe_api_call(monitor.exchange.fapiPublicGetKlines, raw_params)
-                        df = pd.DataFrame([[k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])] for k in klines],
-                                          columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
                         
-                        # 🌟 核心提速：将消耗 CPU 的 Pandas 数据帧计算放入多线程后台执行
-                        df = await asyncio.to_thread(calculate_indicators, df)
-                        
-                        current_price = df['close'].iloc[-1]
-                        current_rsi = df['rsi'].iloc[-1]
-                        current_atr = df['atr'].iloc[-1]
+                        # 🌟 核心提速：将消耗 CPU 的指标计算完全推入多线程后台执行
+                        current_price, current_rsi, current_atr = await asyncio.to_thread(calculate_indicators, [[k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])] for k in klines])
                         
                         # 2. 趋势方向探测
                         trend_allowed = True
@@ -184,10 +192,9 @@ async def run_auto_bot_v3():
                         if use_trend_filter:
                             trend_params = {'symbol': symbol.replace('/', ''), 'interval': trend_timeframe, 'limit': 100}
                             trend_klines = await monitor._safe_api_call(monitor.exchange.fapiPublicGetKlines, trend_params)
-                            df_trend = pd.DataFrame([[k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])] for k in trend_klines],
-                                                    columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-                            df_trend['ema'] = df_trend['close'].ewm(span=trend_ema_period, adjust=False).mean()
-                            latest_ema = df_trend['ema'].iloc[-1]
+                            
+                            # 🌟 核心提速：将趋势计算也推入多线程
+                            latest_ema = await asyncio.to_thread(calculate_trend_ema, [[k[0], float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])] for k in trend_klines], trend_ema_period)
                             
                             trend_direction = "up" if current_price > latest_ema else "down"
                             logger.info(f"📊 {symbol} 趋势方向: {trend_direction} (EMA{trend_ema_period}: {latest_ema:.2f})")
@@ -294,8 +301,8 @@ async def run_auto_bot_v3():
                                 logger.info(f"  🎯 原生止盈单挂载成功: {tp_price:.2f}")
                             except Exception as e: logger.error(f"  ❌ 止盈单挂载失败: {e}")
                             
-                            # 🌟 新增：成功开仓后，写入本地黑匣子！
-                            log_trade(symbol, signal_side.value.upper(), current_price, base_amount, sl_price, tp_price, order_id)
+                            # 🌟 安全写入：使用后台多线程安全地记录数据库，绝对不卡顿主线程！
+                            await asyncio.to_thread(_sync_log_trade, symbol, signal_side.value.upper(), current_price, base_amount, sl_price, tp_price, order_id)
 
                             # 发送战报
                             await send_enhanced_notification(symbol, signal_side.value.upper(), base_amount, current_price, sl_price, tp_price, order_id)
