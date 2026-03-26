@@ -3,6 +3,9 @@
 Copyright (c) 2026 lingge66. All rights reserved.
 This code is part of the Binance AI Agent project and is protected by copyright law.
 Unauthorized copying, modification, distribution, or use of this code is strictly prohibited.
+
+OpenClaw Binance Agent - 独立网关 (直播最终防弹版)
+含：身份鉴权、指令防抖、AI 极端偏离保护(15%阈值)、双向 TP/SL 强校验
 """
 
 import os
@@ -14,6 +17,8 @@ import aiohttp
 import socket
 import re
 import yaml
+import sqlite3
+import subprocess
 from pathlib import Path
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart, or_f
@@ -21,7 +26,8 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from openai import AsyncOpenAI 
 from dotenv import load_dotenv
 import time
-# 记录用户最后一次交互的时间戳
+
+# 记录用户最后一次交互的时间戳，用于防抖
 _user_command_locks = {}
 # 保持对 socket 的引用，防止被 Python 垃圾回收机制回收
 _instance_lock_socket = None
@@ -36,7 +42,8 @@ def enforce_single_instance():
         logging.info("✅ 跨平台单例锁已激活，当前为全网唯一运行实例。")
     except socket.error:
         logging.error("🧟 拦截到重复启动！已有领哥机甲在运行，为防止 409 冲突，当前进程自动退出。")
-        sys.exit(0) # 安全退出，不抛出刺眼的红字报错
+        sys.exit(0)
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - ⚡ 领哥独立网关 - %(message)s')
 
 # ==========================================
@@ -55,11 +62,15 @@ except Exception as e:
     HAS_QUANT = False
 
 # ==========================================
-# ⚙️ 核心配置加载
+# ⚙️ 核心配置加载 (带安全鉴权)
 # ==========================================
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PROXY_URL = os.getenv("TELEGRAM_PROXY") 
+
+ADMIN_ID = str(os.getenv("TELEGRAM_CHAT_ID", "")).strip()
+if not ADMIN_ID:
+    logging.warning("⚠️ 未配置 TELEGRAM_CHAT_ID，任何人都可以控制机甲！请立即在 .env 中配置！")
 
 session = AiohttpSession(proxy=PROXY_URL) if PROXY_URL else None
 bot = Bot(token=TELEGRAM_TOKEN, session=session)
@@ -72,13 +83,31 @@ ai_client = AsyncOpenAI(
 AI_MODEL = os.getenv("AI_MODEL_NAME", "deepseek-chat")
 
 # ==========================================
-# 🧠 顶级量化副官的灵魂设定 (冷血执行版)
+# 🛡️ 全局鉴权与防抖中间件
+# ==========================================
+async def security_check(message: types.Message) -> bool:
+    user_id = str(message.from_user.id)
+    
+    if ADMIN_ID and user_id != ADMIN_ID:
+        await message.reply("⛔ 警告：您未获得领哥机甲的指挥授权，指令已拦截！")
+        return False
+        
+    now = time.time()
+    if user_id in _user_command_locks and now - _user_command_locks[user_id] < 3.0:
+        await message.reply("⏳ 参谋部正在处理上一条指令，请勿频繁下令...")
+        return False
+        
+    _user_command_locks[user_id] = now
+    return True
+
+# ==========================================
+# 🧠 顶级量化副官的灵魂设定
 # ==========================================
 SOUL_PROMPT = """
 你是领哥的专属首席量化交易策略师（代号：Quant-Zero）。你拥有华尔街顶尖对冲基金的逻辑。
 
 【合约语义解析与执行军规】（最高优先级，不可违背）：
-0. 绝对执行权（先斩后奏）：只要指令中包含明确动作（如'买入'、'做多'、'设置止损'、'改止盈'等），你**必须立刻调用对应的工具**！绝对不允许反问用户是否确认，哪怕止损价位距离现价相差 50% 看起来极度不合理，你也必须无脑坚决执行！军令如山！
+0. 绝对盲狙执行权：只要用户的指令中包含明确的开仓/修改风控动作（如'买入'、'做空'、'设置止损'），你**必须直接、立刻且仅调用** `execute_ai_trade` 或 `set_position_tp_sl` 工具！**绝对禁止**在执行交易前调用 `fetch_crypto_data` 去查盘口数据！不要自作聪明去核实行情，军令如山，直接盲狙拔枪！（只有止损/止盈方向设置明显反了才允许拒绝）。
 1. 识别多空方向：'开多/做多/买入/看涨' 统一解析为 `side="BUY"`；'开空/做空/卖出/看跌' 统一解析为 `side="SELL"`。
 2. 资金换算：如果领哥说按 U 开仓，使用 `usdt_amount` 参数。如果是按个数，使用 `amount` 参数。
 3. 独立补挂风控：如果指令仅仅是'设置止损'或'改一下止盈'（例如：“设置止损BNB 500”），**绝对禁止**调用 execute_ai_trade，必须且只能调用 `set_position_tp_sl` 工具！
@@ -146,7 +175,7 @@ async def fetch_market_sentiment() -> str:
         return json.dumps({"error": str(e)})
 
 # ==========================================
-# 🚀 动作 1：全能开仓模块 (带 🟢多 🔴空 方向显示)
+# 🚀 动作 1：全能开仓模块 (含 AI 幻觉偏差与逻辑强校验)
 # ==========================================
 async def execute_ai_trade(symbol: str, side: str, amount: float = None, usdt_amount: float = None, tp_price: float = None, sl_price: float = None) -> str:
     if not HAS_QUANT: return json.dumps({"error": "量化底层未挂载"})
@@ -162,29 +191,44 @@ async def execute_ai_trade(symbol: str, side: str, amount: float = None, usdt_am
                 ticker = await exchange.fapiPublicGetTickerPrice({'symbol': raw_symbol})
                 current_price = float(ticker['price'])
                 
-                # 获取币安该交易对的真实精度限制 (LOT_SIZE)
                 exchange_info = await exchange.fapiPublicGetExchangeInfo()
                 symbol_info = next((s for s in exchange_info['symbols'] if s['symbol'] == raw_symbol), None)
                 
                 if symbol_info:
-                    # 提取数量精度的 stepSize (比如 "0.010" 或 "1.000")
                     lot_filter = next((f for f in symbol_info['filters'] if f['filterType'] == 'LOT_SIZE'), None)
                     if lot_filter:
                         step_size = float(lot_filter['stepSize'])
-                        # 精准向下取整，完美契合币安精度 (例如 step_size 是 0.01，算出来是 0.938，会截断成 0.93)
                         raw_amount = usdt_amount / current_price
-                        amount = round(raw_amount - (raw_amount % step_size), 6) # 防止浮点数误差
-                        # 去除末尾多余的 .0
+                        amount = round(raw_amount - (raw_amount % step_size), 6)
                         amount = int(amount) if amount.is_integer() else amount
                 else:
-                    # 极端兜底：如果没查到，默认保留 1 位小数，最安全
                     amount = round(usdt_amount / current_price, 1)
-
             except Exception as e:
                 return json.dumps({"status": "ERROR", "msg": f"❌ 转换U本位金额失败: {str(e)}"})
         
         if not amount or amount <= 0:
             return json.dumps({"status": "ERROR", "msg": "❌ 开仓数量无效。"})
+
+        # 🌟 机构级硬风控：TP/SL 逻辑防痴呆拦截 + 极端偏差保护 (最大偏离 80%)
+        try:
+            ticker_check = await exchange.fapiPublicGetTickerPrice({'symbol': raw_symbol})
+            check_price = float(ticker_check['price'])
+            max_deviation_sl = 0.80  # 止损最大允许偏离现价 80%
+            max_deviation_tp = 2.00  # 止盈最大允许偏离现价 200%
+            
+            if sl_price:
+                if (side_str == 'BUY' and sl_price >= check_price) or (side_str == 'SELL' and sl_price <= check_price):
+                    return json.dumps({"status": "ERROR", "msg": "❌ 触发国防级风控：多单止损必须低于现价，空单止损必须高于现价！已切断开仓。"})
+                if abs(sl_price - check_price) / check_price > max_deviation_sl:
+                    return json.dumps({"status": "ERROR", "msg": f"❌ 触发国防级风控：止损价偏离现价超过 {max_deviation_sl*100}%，为防止 AI 幻觉乱开单，已拦截！"})
+            
+            if tp_price:
+                if (side_str == 'BUY' and tp_price <= check_price) or (side_str == 'SELL' and tp_price >= check_price):
+                    return json.dumps({"status": "ERROR", "msg": "❌ 触发国防级风控：多单止盈必须高于现价，空单止盈必须低于现价！已切断开仓。"})
+                if abs(tp_price - check_price) / check_price > max_deviation_tp:
+                    return json.dumps({"status": "ERROR", "msg": f"❌ 触发国防级风控：止盈价偏离现价超过 {max_deviation_tp*100}%，过于离谱，已拦截！"})
+        except Exception as e:
+            logging.error(f"价格预检出错，跳过强校验: {e}")
 
         amt_str = f"{amount:g}"
         pos_side = None
@@ -247,12 +291,10 @@ async def execute_ai_trade(symbol: str, side: str, amount: float = None, usdt_am
     except Exception as e:
         return json.dumps({"status": "ERROR", "msg": f"❌ 交易执行崩溃: {str(e)}"})
 
-
 # ==========================================
-# 🚀 动作 2：独立风控模块 (上帝视角智能推断方向)
+# 🚀 动作 2：独立风控模块 (含 AI 幻觉偏差与逻辑强校验)
 # ==========================================
 async def set_position_tp_sl(symbol: str, tp_price: float = None, sl_price: float = None) -> str:
-    """为已有持仓单独追加或修改止盈止损 (支持双向持仓智能识别)"""
     if not HAS_QUANT: return json.dumps({"error": "量化底层未挂载"})
     try:
         await arsenal.initialize()
@@ -287,6 +329,19 @@ async def set_position_tp_sl(symbol: str, tp_price: float = None, sl_price: floa
             
             target_side_str = 'LONG' if is_long else 'SHORT'
             target_pos = next((p for p in active_positions if str(getattr(p, 'positionSide', getattr(p, 'side', ''))).upper() == target_side_str), active_positions[0])
+
+        
+        # 🌟 机构级硬风控：追加风控时的逻辑强校验
+        if current_price > 0:
+            if sl_price:
+                if (is_long and sl_price >= current_price) or (not is_long and sl_price <= current_price):
+                    return json.dumps({"status": "ERROR", "msg": "❌ 止损价设置逻辑错误！多单止损必须低于现价，空单必须高于现价。已拦截。"})
+                # 👇 把这里的 0.15 改成 0.80
+                if abs(sl_price - current_price) / current_price > 0.80:
+                    return json.dumps({"status": "ERROR", "msg": "❌ 止损价偏离现价超过 80%，触发防手抖拦截！"})
+            if tp_price:
+                if (is_long and tp_price <= current_price) or (not is_long and tp_price >= current_price):
+                    return json.dumps({"status": "ERROR", "msg": "❌ 止盈价设置逻辑错误！多单止盈必须高于现价，空单必须低于现价。已拦截。"})
 
         close_side = 'SELL' if is_long else 'BUY'
         pos_side = 'LONG' if is_long else 'SHORT'
@@ -342,26 +397,17 @@ def sanitize_ai_output(text: str) -> str:
     if re.search(r'(<｜DSML｜|invoke name|functioncalls)', text, re.IGNORECASE):
         return "⚠️ **拦截器触发**：引擎遭遇底层格式泄露。请您重新发送指令！"
     return text
+
 def humanize_error(error_obj: Exception, context: str = "") -> str:
-    """
-    人性化异常翻译官：将晦涩的机器报错翻译成小白能懂的文案
-    """
     error_str = str(error_obj).lower()
     prefix = f"❌ {context}失败：" if context else "❌ 执行中止："
 
-    # ==========================================
-    # 🧠 1. 大语言模型 (AI / DeepSeek / OpenAI) 错误
-    # ==========================================
     if "401" in error_str and ("api key" in error_str or "authentication" in error_str):
         return prefix + "AI 大脑神经断开。原因：LLM_API_KEY 无效、填写错误或已过期，请检查 .env 文件。"
     elif "429" in error_str or "insufficient_quota" in error_str or "balance" in error_str:
         return prefix + "AI 大脑算力耗尽。原因：API 额度已用完或请求过于频繁，请充值或稍后再试。"
     elif "timeout" in error_str:
         return prefix + "AI 思考超时。原因：网络拥堵或大模型服务器响应太慢，请重新发送指令。"
-
-    # ==========================================
-    # 🏦 2. 币安 API 与资金报错
-    # ==========================================
     elif "invalid api-key" in error_str or "api-key format invalid" in error_str:
         return prefix + "交易所未授权。原因：币安 API Key 填写错误，请检查 .env 配置。"
     elif "signature for this request is not valid" in error_str:
@@ -374,26 +420,72 @@ def humanize_error(error_obj: Exception, context: str = "") -> str:
         return prefix + "杠杆/风控限制。原因：当前开仓金额过大，触发了币安的最高杠杆规则限制。"
     elif "position side does not match" in error_str:
         return prefix + "仓位模式冲突。原因：系统请求了双向持仓模式，但你的币安账户目前是单向持仓，请去 App 里修改设置。"
-    
-    # ==========================================
-    # 🔌 3. 网络与系统级错误
-    # ==========================================
     elif "connection refused" in error_str:
         return prefix + "网络连接被拒绝。原因：服务器无法访问外部网络，请检查代理或防火墙。"
-    
-    # ==========================================
-    # 🤷‍♂️ 4. 未知兜底
-    # ==========================================
     else:
-        # 如果匹配不到，就原样输出，但加上截断防止太长刷屏
         short_err = str(error_obj)[:150] + ("..." if len(str(error_obj)) > 150 else "")
         return prefix + f"遭遇未知底层异常 - `{short_err}`"
+
+# ==========================================
+# 🧠 参谋部核心逻辑：黑匣子数据提取与 AI 诊断
+# ==========================================
+def _fetch_db_data_sync(db_path):
+    trade_data_str = ""
+    has_real_data = False
+    try:
+        conn = sqlite3.connect(db_path, timeout=10.0)
+        cursor = conn.cursor()
+        cursor.execute('PRAGMA journal_mode=WAL;')
+        cursor.execute("SELECT timestamp, symbol, side, entry_price, quantity, sl_price, tp_price FROM trades ORDER BY timestamp DESC LIMIT 30")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        if rows:
+            has_real_data = True
+            for r in rows:
+                trade_data_str += f"时间:{r[0]}, 标的:{r[1]}, 方向:{r[2]}, 入场价:{r[3]:.4f}, 数量:{r[4]}, 止损价:{r[5]:.4f}, 止盈价:{r[6]:.4f}\n"
+    except Exception as e:
+        logging.error(f"读取数据库失败: {e}")
+    return has_real_data, trade_data_str
+
+async def generate_ai_trade_analysis() -> str:
+    db_path = Path(__file__).parent / "data" / "trade_history.db"
+    
+    if db_path.exists():
+        has_real_data, trade_data_str = await asyncio.to_thread(_fetch_db_data_sync, db_path)
+    else:
+        has_real_data, trade_data_str = False, ""
+            
+    if not has_real_data:
+        trade_data_str = """
+[演示数据1] 时间:昨日, 标的:BTCUSDT, 方向:SELL, 入场:71000, 止损:72000, 止盈:69000 (结果:触及止损,亏损)
+[演示数据2] 时间:昨日, 标的:ETHUSDT, 方向:BUY, 入场:2150, 止损:2100, 止盈:2225 (结果:触及止盈,盈利)
+[演示数据3] 时间:今日, 标的:BTCUSDT, 方向:BUY, 入场:68000, 止损:67000, 止盈:69500 (结果:触及止损,亏损)
+"""
+        prompt_context = f"以下是【虚拟演示数据】。请你在报告开头明确标注【🧪 演示模式诊断】，然后基于这些虚拟数据，评估系统采用的(EMA50顺势+RSI30/70+ATR止盈止损)策略，指出可能存在的问题，并给出具体的参数优化建议：\n{trade_data_str}"
+    else:
+        prompt_context = f"以下是领哥机甲真实的近期开仓记录。请作为顶尖量化策略师，分析这些开仓位置的合理性，评估(EMA50顺势+RSI30/70+ATR止盈止损)策略在当前行情下的表现，必须给出【具体的参数调整建议】（如：建议将RSI超买改至75，ATR止损调至2.5等）：\n{trade_data_str}"
+
+    messages = [
+        {"role": "system", "content": "你是一位拥有十年华尔街对冲基金经验的首席高频量化分析师。你的回答必须极度专业、一针见血。请使用清晰的 Markdown 格式输出研报。"},
+        {"role": "user", "content": prompt_context}
+    ]
+    
+    try:
+        response = await ai_client.chat.completions.create(model=AI_MODEL, messages=messages)
+        analysis_text = sanitize_ai_output(response.choices[0].message.content)
+        prefix = "🧪 **[系统演示] 历史战绩策略检诊报告**\n" if not has_real_data else "📈 **[实盘复盘] 策略运行深度诊断报告**\n"
+        return prefix + "\n" + analysis_text
+    except Exception as e:
+        return f"❌ AI 策略诊断生成失败: {e}"
+
 # ==========================================
 # 🥇 各种机器人指令拦截器
 # ==========================================
 @dp.message(CommandStart())
 @dp.message(Command("help"))
 async def send_welcome(message: types.Message):
+    if not await security_check(message): return
     welcome_text = """
 🌌 <b>[系统在线] 领哥量化机甲 (Quant-Zero V1.0 满配版)</b>
 ======================================
@@ -403,6 +495,7 @@ async def send_welcome(message: types.Message):
 ⚡️ <b>【常用指令】</b>
 👉 /balance ：调出持仓面板 (或发 <code>查账</code>)
 👉 /closeall ：一键熔断所有仓位 (或发 <code>快跑</code>)
+👉 /analyze ：AI 复盘分析 (或发 <code>策略优化</code>)
 👉 /logs 15 ：查看最近 15 行日志
 👉 /add_symbol ：增加监控标的
 
@@ -417,6 +510,7 @@ async def send_welcome(message: types.Message):
 
 @dp.message(lambda msg: msg.text and re.match(r'^(?:/add_symbol|添加监控|增加标的|监控|添加)\s+([a-zA-Z0-9/]+)$', msg.text.strip(), re.IGNORECASE))
 async def add_symbol_handler(message: types.Message):
+    if not await security_check(message): return
     match = re.match(r'^(?:/add_symbol|添加监控|增加标的|监控|添加)\s+([a-zA-Z0-9/]+)$', message.text.strip(), re.IGNORECASE)
     symbol = match.group(1).replace('/', '').upper()
     if not symbol.endswith('USDT'): symbol += 'USDT' 
@@ -444,6 +538,7 @@ async def add_symbol_handler(message: types.Message):
 
 @dp.message(lambda msg: msg.text and re.match(r'^(?:/logs|查看日志|看日志|系统日志|日志)(?:\s+(\d+))?$', msg.text.strip()))
 async def logs_handler(message: types.Message):
+    if not await security_check(message): return
     match = re.match(r'^(?:/logs|查看日志|看日志|系统日志|日志)(?:\s+(\d+))?$', message.text.strip())
     lines_str = match.group(1)
     lines = int(lines_str) if lines_str else 20
@@ -470,6 +565,7 @@ async def logs_handler(message: types.Message):
 
 @dp.message(or_f(Command("balance"), F.text.in_({"查账", "余额", "查余额", "资产", "持仓"})))
 async def fast_balance(message: types.Message):
+    if not await security_check(message): return
     if HAS_QUANT:
         try:
             ui_text = await get_quant_account_status()
@@ -480,13 +576,13 @@ async def fast_balance(message: types.Message):
 
 @dp.message(or_f(Command("closeall"), F.text.in_({"快跑", "一键平仓", "清仓", "平仓"})))
 async def fast_emergency_close(message: types.Message):
+    if not await security_check(message): return
     if HAS_QUANT:
-        # 🌟 核心补丁：熔断前，先强行熄火 PM2 自动化引擎，防止它瞬间重新建仓！
-        CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-        # 静默执行关闭命令
-        os.system(f"cd {CURRENT_DIR} && pm2 stop Quant-AutoTrader > /dev/null 2>&1")
+        try:
+            subprocess.run(["pm2", "stop", "Quant-AutoTrader"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            logging.error(f"切断后台引擎失败: {e}")
         
-        # 给用户一个安心的提示
         await message.reply("⚡ 正在强行切断后台自动化引擎，并执行全量平仓...", parse_mode="Markdown")
         
         ui_text = await emergency_close_all_positions()
@@ -497,26 +593,25 @@ async def fast_emergency_close(message: types.Message):
 
 @dp.message(or_f(Command("start_auto"), F.text.in_({"开启自动交易", "出海", "开启航母"})))
 async def start_auto_trading(message: types.Message):
+    if not await security_check(message): return
     thinking_msg = await message.reply("⚙️ *点火中...*", parse_mode="Markdown")
     try:
-        # 获取底层配置
         if HAS_QUANT:
             await arsenal.initialize()
             auto_cfg = arsenal.config.get('auto_trade', {})
         else:
             auto_cfg = {}
 
-        # 精准锁定路径并启动 PM2
-        CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+        CURRENT_DIR = str(Path(__file__).resolve().parent)
         
-        # 🌟 核心修复：每次点火前，先无情斩杀可能存在的所有历史克隆进程！
-        os.system("pm2 delete Quant-AutoTrader > /dev/null 2>&1") 
+        try:
+            subprocess.run(["pm2", "delete", "Quant-AutoTrader"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except: pass
         
-        # 重新启动唯一的干净实例
-        result = os.system(f"cd {CURRENT_DIR} && pm2 start main_auto_bot.py --name Quant-AutoTrader")
+        process_result = subprocess.run(["pm2", "start", "main_auto_bot.py", "--name", "Quant-AutoTrader"], cwd=CURRENT_DIR)
+        result = process_result.returncode
         
         if result == 0:
-            # 读取配置详情用于UI展示
             symbols = auto_cfg.get('symbols', ["BTCUSDT"])
             base_amount = auto_cfg.get('base_amount', 0.01)
             rsi_oversold = auto_cfg.get('rsi_oversold', 30)
@@ -528,7 +623,6 @@ async def start_auto_trading(message: types.Message):
             trend_ema = auto_cfg.get('trend_ema_period', 50)
             trend_tf = auto_cfg.get('trend_timeframe', '1h')
             
-            # 组装帅气的战术面板
             report = (
                 f"🚀 **航母已出港！自动化引擎启动**\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
@@ -543,7 +637,7 @@ async def start_auto_trading(message: types.Message):
                 f"{f'  ├─ EMA周期: `{trend_ema}`' if use_trend_filter else ''}\n"
                 f"{f'  └─ 时间框架: `{trend_tf}`' if use_trend_filter else ''}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
-                f"📡 **实时日志**：发送 `/logs` 或 `pm2 logs Quant-AutoTrader`\n"
+                f"📡 **实时日志**：发送 `/logs`\n"
                 f"🛡️ **风控规则**：已集成规则引擎（仓位限制、每日亏损熔断等）"
             )
             await thinking_msg.edit_text(report, parse_mode="Markdown")
@@ -554,10 +648,11 @@ async def start_auto_trading(message: types.Message):
 
 @dp.message(or_f(Command("stop_auto"), F.text.in_({"停止自动交易", "返航", "关闭航母", "关闭自动交易"})))
 async def stop_auto_trading(message: types.Message):
+    if not await security_check(message): return
     thinking_msg = await message.reply("⚙️ *返航中...*", parse_mode="Markdown")
     try:
-        CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-        result = os.system(f"cd {CURRENT_DIR} && pm2 stop Quant-AutoTrader")
+        process_result = subprocess.run(["pm2", "stop", "Quant-AutoTrader"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        result = process_result.returncode
         if result == 0: 
             await thinking_msg.edit_text("⚓ **航母已熄火。** 自动交易已切断。", parse_mode="Markdown")
         else: 
@@ -565,62 +660,9 @@ async def stop_auto_trading(message: types.Message):
     except Exception as e:
         await thinking_msg.edit_text(f"❌ 熄火失败: {e}")
 
-import sqlite3
-
-# ==========================================
-# 🧠 参谋部核心逻辑：黑匣子数据提取与 AI 诊断
-# ==========================================
-async def generate_ai_trade_analysis() -> str:
-    """读取 SQLite 黑匣子，并调用 LLM 生成专业的策略诊断研报"""
-    db_path = Path(__file__).parent / "data" / "trade_history.db"
-    has_real_data = False
-    trade_data_str = ""
-    
-    if db_path.exists():
-        try:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            # 提取最近的 30 笔交易记录用于分析
-            cursor.execute("SELECT timestamp, symbol, side, entry_price, quantity, sl_price, tp_price FROM trades ORDER BY timestamp DESC LIMIT 30")
-            rows = cursor.fetchall()
-            conn.close()
-            
-            if rows:
-                has_real_data = True
-                for r in rows:
-                    trade_data_str += f"时间:{r[0]}, 标的:{r[1]}, 方向:{r[2]}, 入场价:{r[3]:.4f}, 数量:{r[4]}, 止损价:{r[5]:.4f}, 止盈价:{r[6]:.4f}\n"
-        except Exception as e:
-            logging.error(f"读取数据库失败: {e}")
-            
-    if not has_real_data:
-        # 🧪 伪造一份逼真的演示数据喂给 AI
-        trade_data_str = """
-[演示数据1] 时间:昨日, 标的:BTCUSDT, 方向:SELL, 入场:71000, 止损:72000, 止盈:69000 (结果:触及止损,亏损)
-[演示数据2] 时间:昨日, 标的:ETHUSDT, 方向:BUY, 入场:2150, 止损:2100, 止盈:2225 (结果:触及止盈,盈利)
-[演示数据3] 时间:今日, 标的:BTCUSDT, 方向:BUY, 入场:68000, 止损:67000, 止盈:69500 (结果:触及止损,亏损)
-"""
-        prompt_context = f"以下是【虚拟演示数据】。请你在报告开头明确标注【🧪 演示模式诊断】，然后基于这些虚拟数据，评估系统采用的(EMA50顺势+RSI30/70+ATR止盈止损)策略，指出可能存在的问题，并给出具体的参数优化建议：\n{trade_data_str}"
-    else:
-        prompt_context = f"以下是领哥机甲真实的近期开仓记录。请作为顶尖量化策略师，分析这些开仓位置的合理性，评估(EMA50顺势+RSI30/70+ATR止盈止损)策略在当前行情下的表现，必须给出【具体的参数调整建议】（如：建议将RSI超买改至75，ATR止损调至2.5等）：\n{trade_data_str}"
-
-    messages = [
-        {"role": "system", "content": "你是一位拥有十年华尔街对冲基金经验的首席高频量化分析师。你的回答必须极度专业、一针见血。请使用清晰的 Markdown 格式输出研报。"},
-        {"role": "user", "content": prompt_context}
-    ]
-    
-    try:
-        response = await ai_client.chat.completions.create(model=AI_MODEL, messages=messages)
-        analysis_text = sanitize_ai_output(response.choices[0].message.content)
-        prefix = "🧪 **[系统演示] 历史战绩策略检诊报告**\n" if not has_real_data else "📈 **[实盘复盘] 策略运行深度诊断报告**\n"
-        return prefix + "\n" + analysis_text
-    except Exception as e:
-        return f"❌ AI 策略诊断生成失败: {e}"
-
-# ==========================================
-# 🥇 新增指令：独立的策略复盘与优化触发器
-# ==========================================
 @dp.message(or_f(Command("analyze"), F.text.in_({"分析交易", "分析交易记录", "策略优化", "复盘", "复盘分析"})))
 async def analyze_trades_handler(message: types.Message):
+    if not await security_check(message): return
     thinking_msg = await message.reply("🧠 *参谋部正在调取历史战绩黑匣子，生成策略诊断报告...*", parse_mode="Markdown")
     try:
         ai_analysis_report = await generate_ai_trade_analysis()
@@ -631,16 +673,12 @@ async def analyze_trades_handler(message: types.Message):
     except Exception as e:
         friendly_err = humanize_error(e, context="生成诊断报告")
         await thinking_msg.edit_text(friendly_err)
-# ==========================================
+
 @dp.message()
 async def smart_ai_chat(message: types.Message):
     if not message.text: return
-    # 🌟 极简防抖拦截：3秒内禁止重复发指令
-    user_id = message.from_user.id
-    now = time.time()
-    if user_id in _user_command_locks and now - _user_command_locks[user_id] < 3.0:
-        return await message.reply("⏳ 参谋部正在处理上一条指令，请勿频繁点击...")
-    _user_command_locks[user_id] = now
+    if not await security_check(message): return
+    
     thinking_msg = await message.reply("🧠 *参谋部推演中...*", parse_mode="Markdown")
     messages = [{"role": "system", "content": SOUL_PROMPT}, {"role": "user", "content": message.text}]
     
